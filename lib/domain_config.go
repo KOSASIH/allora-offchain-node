@@ -11,13 +11,22 @@ import (
 	feemarkettypes "github.com/skip-mev/feemarket/x/feemarket/types"
 )
 
+const AutoGasPrices = "auto"
+
+// Minimum values
 const (
 	WindowCorrectionFactorSuggestedMin = 0.5
 	BlockDurationEstimatedMin          = 1.0
 	GasPriceUpdateIntervalMin          = 5
 	RetryDelayMin                      = 1
 	AccountSequenceRetryDelayMin       = 1
-	AutoGasPrices                      = "auto"
+)
+
+// Default values
+const (
+	DefaultTimeoutRPCSecondsQuery int64 = 60
+	DefaultTimeoutRPCSecondsTx    int64 = 300
+	DefaultGasPriceUpdateInterval int64 = 60
 )
 
 // Properties manually provided by the user as part of UserConfig
@@ -28,9 +37,9 @@ type WalletConfig struct {
 	AlloraHomeDir             string  // home directory for the allora keystore
 	Gas                       string  // gas to use for the allora client
 	GasAdjustment             float64 // gas adjustment to use for the allora client
-	GasPrices                 string  // gas prices to use for the allora client - "auto" for no fees
+	GasPrices                 string  // gas prices to use for the allora client - "auto" for auto-calculated fees
 	GasPriceUpdateInterval    int64   // number of seconds to wait between updates to the gas price
-	MaxFees                   uint64  // max gas to use for the allora client
+	MaxFees                   uint64  // max fees to pay for a single transaction
 	NodeRpc                   string  // rpc node for allora chain
 	MaxRetries                int64   // retry to get data from chain up to this many times per query or tx
 	RetryDelay                int64   // number of seconds to wait between retries (general case)
@@ -38,6 +47,9 @@ type WalletConfig struct {
 	SubmitTx                  bool    // useful for dev/testing. set to false to run in dry-run processes without committing to the chain
 	BlockDurationEstimated    float64 // estimated average block duration in seconds
 	WindowCorrectionFactor    float64 // correction factor for the time estimation, suggested range 0.7-0.9.
+	TimeoutRPCSecondsQuery    int64   // timeout for rpc calls in seconds
+	TimeoutRPCSecondsTx       int64   // timeout for rpc calls in seconds
+	TimeoutPayloadSeconds     int64   // timeout for payload processing
 }
 
 // Properties auto-generated based on what the user has provided in WalletConfig fields of UserConfig
@@ -129,6 +141,19 @@ type ValueBundle struct {
 	OneOutInfererValues    []NodeValue `json:"oneOutInfererValues,omitempty"`
 	OneOutForecasterValues []NodeValue `json:"oneOutForecasterValues,omitempty"`
 	OneInForecasterValues  []NodeValue `json:"oneInForecasterValues,omitempty"`
+}
+
+// Check and set defaults for the user config if any values are not set
+func (c *UserConfig) CheckAndSetDefaults() {
+	if c.Wallet.TimeoutRPCSecondsQuery == 0 {
+		c.Wallet.TimeoutRPCSecondsQuery = DefaultTimeoutRPCSecondsQuery
+	}
+	if c.Wallet.TimeoutRPCSecondsTx == 0 {
+		c.Wallet.TimeoutRPCSecondsTx = DefaultTimeoutRPCSecondsTx
+	}
+	if c.Wallet.GasPriceUpdateInterval == 0 {
+		c.Wallet.GasPriceUpdateInterval = DefaultGasPriceUpdateInterval
+	}
 }
 
 // Check that each assigned entrypoint in the user config actually can be used

@@ -117,7 +117,11 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) {
 // Attempts to build and commit a worker payload for a given nonce
 // Returns the nonce height acted upon (the received one or the new one if any)
 func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.WorkerConfig, latestNonceHeightActedUpon int64, timeoutHeight uint64) (int64, error) {
-	latestOpenWorkerNonce, err := suite.Node.GetLatestOpenWorkerNonceByTopicId(ctx, worker.TopicId)
+	// Get latest nonce with RPC timeout
+	latestOpenWorkerNonce, err := WithTimeoutResult(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsQuery)*time.Second,
+		func(ctx context.Context) (*emissionstypes.Nonce, error) {
+			return suite.Node.GetLatestOpenWorkerNonceByTopicId(ctx, worker.TopicId)
+		})
 
 	if err != nil {
 		log.Warn().Err(err).Uint64("topicId", worker.TopicId).Msg("Error getting latest open worker nonce on topic - node availability issue?")
@@ -125,8 +129,12 @@ func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.
 	}
 
 	if latestOpenWorkerNonce.BlockHeight > latestNonceHeightActedUpon {
-		// Check if worker can submit
-		isWhitelisted, err := suite.Node.CanSubmitWorker(ctx, worker.TopicId, suite.Node.Wallet.Address)
+		// Check whitelist with RPC timeout
+		isWhitelisted, err := WithTimeoutResult(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsQuery)*time.Second,
+			func(ctx context.Context) (bool, error) {
+				return suite.Node.CanSubmitWorker(ctx, worker.TopicId, suite.Node.Wallet.Address)
+			})
+
 		if err != nil {
 			log.Error().Err(err).Uint64("topicId", worker.TopicId).Msg("Failed to check if worker is whitelisted")
 			return latestNonceHeightActedUpon, err
@@ -136,12 +144,16 @@ func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.
 			return latestOpenWorkerNonce.BlockHeight, nil
 		}
 
-		log.Debug().Uint64("topicId", worker.TopicId).Int64("BlockHeight", latestOpenWorkerNonce.BlockHeight).
-			Msg("Building and committing worker payload for topic")
-		err = suite.BuildCommitWorkerPayload(ctx, worker, latestOpenWorkerNonce, timeoutHeight)
+		// Build and commit payload with transaction timeout
+		err = WithTimeout(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsTx)*time.Second,
+			func(ctx context.Context) error {
+				return suite.BuildCommitWorkerPayload(ctx, worker, latestOpenWorkerNonce, timeoutHeight)
+			})
+
 		if err != nil {
 			return latestNonceHeightActedUpon, errorsmod.Wrapf(err, "error building and committing worker payload for topic")
 		}
+
 		log.Debug().Uint64("topicId", worker.TopicId).
 			Str("actorType", "worker").
 			Msg("Successfully finished processing payload")
@@ -155,7 +167,11 @@ func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.
 }
 
 func (suite *UseCaseSuite) processReputerPayload(ctx context.Context, reputer lib.ReputerConfig, latestNonceHeightActedUpon int64, timeoutHeight uint64) (int64, error) {
-	nonce, err := suite.Node.GetOldestReputerNonceByTopicId(ctx, reputer.TopicId)
+	// Get nonce with RPC timeout
+	nonce, err := WithTimeoutResult(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsQuery)*time.Second,
+		func(ctx context.Context) (*emissionstypes.Nonce, error) {
+			return suite.Node.GetOldestReputerNonceByTopicId(ctx, reputer.TopicId)
+		})
 
 	if err != nil {
 		log.Warn().Err(err).Uint64("topicId", reputer.TopicId).Msg("Error getting latest open reputer nonce on topic - node availability issue?")
@@ -163,8 +179,12 @@ func (suite *UseCaseSuite) processReputerPayload(ctx context.Context, reputer li
 	}
 
 	if nonce.BlockHeight > latestNonceHeightActedUpon {
-		// Check if reputer can submit
-		isWhitelisted, err := suite.Node.CanSubmitReputer(ctx, reputer.TopicId, suite.Node.Wallet.Address)
+		// Check whitelist with RPC timeout
+		isWhitelisted, err := WithTimeoutResult(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsQuery)*time.Second,
+			func(ctx context.Context) (bool, error) {
+				return suite.Node.CanSubmitReputer(ctx, reputer.TopicId, suite.Node.Wallet.Address)
+			})
+
 		if err != nil {
 			log.Error().Err(err).Uint64("topicId", reputer.TopicId).Msg("Failed to check if reputer is whitelisted")
 			return latestNonceHeightActedUpon, err
@@ -174,12 +194,16 @@ func (suite *UseCaseSuite) processReputerPayload(ctx context.Context, reputer li
 			return nonce.BlockHeight, nil
 		}
 
-		log.Debug().Uint64("topicId", reputer.TopicId).Int64("BlockHeight", nonce.BlockHeight).
-			Msg("Building and committing reputer payload for topic")
-		err = suite.BuildCommitReputerPayload(ctx, reputer, nonce.BlockHeight, timeoutHeight)
+		// Build and commit payload with transaction timeout
+		err = WithTimeout(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsTx)*time.Second,
+			func(ctx context.Context) error {
+				return suite.BuildCommitReputerPayload(ctx, reputer, nonce.BlockHeight, timeoutHeight)
+			})
+
 		if err != nil {
 			return latestNonceHeightActedUpon, errorsmod.Wrapf(err, "error building and committing reputer payload for topic")
 		}
+
 		log.Debug().Uint64("topicId", reputer.TopicId).
 			Str("actorType", "reputer").
 			Msg("Successfully finished processing payload")
@@ -533,7 +557,10 @@ func queryTopicInfo[T lib.TopicActor](
 	suite *UseCaseSuite,
 	config T,
 ) (*emissionstypes.Topic, error) {
-	topicInfo, err := suite.Node.GetTopicInfo(ctx, config.GetTopicId())
+	topicInfo, err := WithTimeoutResult(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsQuery)*time.Second,
+		func(ctx context.Context) (*emissionstypes.Topic, error) {
+			return suite.Node.GetTopicInfo(ctx, config.GetTopicId())
+		})
 	if err != nil {
 		return nil, errorsmod.Wrapf(err, "failed to get topic info")
 	}
