@@ -15,9 +15,11 @@ func NewUseCaseSuite(userConfig lib.UserConfig) (*UseCaseSuite, error) {
 	if err != nil {
 		return nil, err
 	}
+	userConfig.CheckAndSetDefaults()
 	nodeConfig, err := userConfig.GenerateNodeConfig()
 	if err != nil {
 		return nil, err
 	}
+
 	return &UseCaseSuite{Node: *nodeConfig}, nil // nolint: exhaustruct
 }

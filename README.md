@@ -152,6 +152,13 @@ The wallet configuration is done in `config.json` under the `wallet` field.
 
 Please see detailed information in [gas_and_fees.md](gas_and_fees.md).
 
+### Timeout configuration
+
+The node will use the following timeouts:
+* `timeoutRPCSecondsQuery`: Timeout for RPC queries in seconds, including retries.
+* `timeoutRPCSecondsTx`: Timeout for RPC sending data in seconds, including retries.
+* `timeoutRPCSecondsRegistration`: Timeout for whole RPC registration process in seconds, including retries.
+
 ### Error handling
 
 Error handling is done differently for different types of errors.

@@ -14,7 +14,10 @@
       "accountSequenceRetryDelay": 5,
       "submitTx": true,
       "blockDurationEstimated": 10,
-      "windowCorrectionFactor": 0.8
+      "windowCorrectionFactor": 0.8,
+      "timeoutRPCSecondsQuery": 60,
+      "timeoutRPCSecondsTx": 300,
+      "timeoutRPCSecondsRegistration": 300
     },
     "worker": [
       {

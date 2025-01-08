@@ -55,6 +55,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [Unreleased]
+
+### Added
+
+* [#101](https://github.com/allora-network/allora-offchain-node/pull/101) Timeout configuration
+
+### Changed
+
+### Fixed
+
+### Removed
+
+### Fixed
+
+### Security
+
 
 ## v0.8.0
 
