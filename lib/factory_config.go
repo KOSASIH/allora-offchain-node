@@ -3,8 +3,11 @@ package lib
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -15,6 +18,9 @@ import (
 	"github.com/ignite/cli/v28/ignite/pkg/cosmosaccount"
 	"github.com/ignite/cli/v28/ignite/pkg/cosmosclient"
 	feemarkettypes "github.com/skip-mev/feemarket/x/feemarket/types"
+
+	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
+	jsonrpc "github.com/cometbft/cometbft/rpc/jsonrpc/client"
 )
 
 func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
@@ -37,6 +43,29 @@ func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
 		log.Info().Str("home", alloraClientHome).Msg("Allora client home directory created")
 	}
 
+	httpClient, err := jsonrpc.DefaultHTTPClient(config.Wallet.NodeRpc)
+	if err != nil {
+		return nil, fmt.Errorf("error creating default http client")
+	}
+
+	httpClient.Timeout = 10 * time.Second
+	if transport, ok := httpClient.Transport.(*http.Transport); ok {
+		transport.DisableKeepAlives = false
+		transport.DisableCompression = false
+		transport.ForceAttemptHTTP2 = true
+		transport.MaxIdleConns = 100
+		transport.IdleConnTimeout = 90 * time.Second
+		transport.TLSHandshakeTimeout = 10 * time.Second
+		transport.ExpectContinueTimeout = 1 * time.Second
+	} else {
+		return nil, fmt.Errorf("unexpected transport type: %T", httpClient.Transport)
+	}
+
+	rpcClient, err := rpchttp.NewWithClient(config.Wallet.NodeRpc, "/websocket", httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("error creating rpc client")
+	}
+
 	client, err := cosmosclient.New(ctx,
 		cosmosclient.WithNodeAddress(config.Wallet.NodeRpc),
 		cosmosclient.WithAddressPrefix(ADDRESS_PREFIX),
@@ -44,6 +73,7 @@ func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
 		cosmosclient.WithGas(config.Wallet.Gas),
 		cosmosclient.WithGasAdjustment(config.Wallet.GasAdjustment),
 		cosmosclient.WithAccountRetriever(authtypes.AccountRetriever{}),
+		cosmosclient.WithRPCClient(rpcClient),
 	)
 	if err != nil {
 		config.Wallet.SubmitTx = false

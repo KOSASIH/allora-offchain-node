@@ -41,7 +41,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for all versions `v1.0.0` and beyond (still considered experimental prior to v1.0.0).
 
-## [Unreleased]
+## vX.Y.Z - TEMPLATE
 
 ### Added
 
@@ -55,11 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+
 ## [Unreleased]
 
 ### Added
 
 * [#101](https://github.com/allora-network/allora-offchain-node/pull/101) Timeout configuration
+* [#104](https://github.com/allora-network/allora-offchain-node/pull/104) Customize rpc client configurations
 
 ### Changed
 
