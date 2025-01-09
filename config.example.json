@@ -17,7 +17,8 @@
       "windowCorrectionFactor": 0.8,
       "timeoutRPCSecondsQuery": 60,
       "timeoutRPCSecondsTx": 300,
-      "timeoutRPCSecondsRegistration": 300
+      "timeoutRPCSecondsRegistration": 300,
+      "timeoutHTTPConnection": 10
     },
     "worker": [
       {

@@ -27,6 +27,7 @@ const (
 	DefaultTimeoutRPCSecondsQuery        int64 = 60
 	DefaultTimeoutRPCSecondsTx           int64 = 300
 	DefaultTimeoutRPCSecondsRegistration int64 = 300
+	DefaultTimeoutHTTPConnection         int64 = 10
 	DefaultGasPriceUpdateInterval        int64 = 60
 )
 
@@ -51,6 +52,7 @@ type WalletConfig struct {
 	TimeoutRPCSecondsQuery        int64   // timeout for rpc queries in seconds, including retries
 	TimeoutRPCSecondsTx           int64   // timeout for rpc data send in seconds, including retries
 	TimeoutRPCSecondsRegistration int64   // timeout for rpc registration in seconds, including retries
+	TimeoutHTTPConnection         int64   // timeout for http connection in seconds
 }
 
 // Properties auto-generated based on what the user has provided in WalletConfig fields of UserConfig
@@ -158,6 +160,9 @@ func (c *UserConfig) CheckAndSetDefaults() {
 	if c.Wallet.GasPriceUpdateInterval == 0 {
 		c.Wallet.GasPriceUpdateInterval = DefaultGasPriceUpdateInterval
 	}
+	if c.Wallet.TimeoutHTTPConnection == 0 {
+		c.Wallet.TimeoutHTTPConnection = DefaultTimeoutHTTPConnection
+	}
 }
 
 // Check that each assigned entrypoint in the user config actually can be used
@@ -201,7 +206,18 @@ func (c *UserConfig) ValidateWalletConfig() error {
 	if c.Wallet.GasPrices == AutoGasPrices && c.Wallet.GasPriceUpdateInterval < GasPriceUpdateIntervalMin {
 		return fmt.Errorf("gas price update interval (in 'auto' mode)lower than the minimum: %d < %d", c.Wallet.GasPriceUpdateInterval, GasPriceUpdateIntervalMin)
 	}
-
+	if c.Wallet.TimeoutHTTPConnection < 0 {
+		return fmt.Errorf("invalid timeout http connection: %d", c.Wallet.TimeoutHTTPConnection)
+	}
+	if c.Wallet.TimeoutRPCSecondsRegistration < 0 {
+		return fmt.Errorf("invalid timeout rpc seconds registration: %d", c.Wallet.TimeoutRPCSecondsRegistration)
+	}
+	if c.Wallet.TimeoutRPCSecondsQuery < 0 {
+		return fmt.Errorf("invalid timeout rpc seconds query: %d", c.Wallet.TimeoutRPCSecondsQuery)
+	}
+	if c.Wallet.TimeoutRPCSecondsTx < 0 {
+		return fmt.Errorf("invalid timeout rpc seconds tx: %d", c.Wallet.TimeoutRPCSecondsTx)
+	}
 	return nil
 }
 

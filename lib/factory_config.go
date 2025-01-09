@@ -48,7 +48,7 @@ func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
 		return nil, fmt.Errorf("error creating default http client")
 	}
 
-	httpClient.Timeout = 10 * time.Second
+	httpClient.Timeout = time.Duration(config.Wallet.TimeoutHTTPConnection) * time.Second
 	if transport, ok := httpClient.Transport.(*http.Transport); ok {
 		transport.DisableKeepAlives = false
 		transport.DisableCompression = false
