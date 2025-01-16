@@ -7,7 +7,7 @@
       "gasAdjustment": 1.2,
       "gasPrices": "auto",
       "gasPriceUpdateInterval": 60,
-      "maxFees": 500000,
+      "maxFees": "500000",
       "nodeRpc": "https://allora-rpc.testnet.allora.network",
       "maxRetries": 5,
       "retryDelay": 3,
@@ -35,7 +35,7 @@
         "topicId": 1,
         "groundTruthEntrypointName": "apiAdapter",
         "lossFunctionEntrypointName": "apiAdapter",
-        "minStake": 100000,
+        "minStake": "100000000",
         "groundTruthParameters": {
           "GroundTruthEndpoint": "http://localhost:8888/gt/{Token}/{BlockHeight}",
           "Token": "ETHUSD"

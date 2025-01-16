@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-
 	errorsmod "cosmossdk.io/errors"
+	cosmossdk_io_math "cosmossdk.io/math"
 	emissions "github.com/allora-network/allora-chain/x/emissions/types"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/ignite/cli/v28/ignite/pkg/cosmosclient"
+	"github.com/rs/zerolog/log"
 	feemarkettypes "github.com/skip-mev/feemarket/x/feemarket/types"
 )
 
@@ -249,18 +249,21 @@ func (node *NodeConfig) SendDataWithRetry(ctx context.Context, req sdktypes.Msg,
 
 		// Handle fees if necessary
 		if gasPrices > 0 {
+
 			// Precalculate fees
 			estimatedGas := float64(txService.Gas()) * node.Wallet.GasAdjustment
-			fees := uint64(float64(estimatedGas+EXCESS_CORRECTION_IN_GAS) * gasPrices)
+			feesFloat := float64(estimatedGas+EXCESS_CORRECTION_IN_GAS) * gasPrices
+			fees := cosmossdk_io_math.NewInt(int64(feesFloat))
 			// Add excess fees correction factor to increase with each fee-problematic retry
-			fees = fees + uint64(float64(recalculateFees)*excessFactorFees)
+			feeAdjustment := int64(float64(recalculateFees) * excessFactorFees)
+			fees = fees.Add(cosmossdk_io_math.NewInt(feeAdjustment))
 			// Limit fees to maxFees
-			if fees > node.Wallet.MaxFees {
-				log.Warn().Uint64("gas", txService.Gas()).Uint64("limit", node.Wallet.MaxFees).Msg("Gas limit exceeded, using maxFees instead")
-				fees = node.Wallet.MaxFees
+			if fees.GT(node.Wallet.MaxFees.Number) {
+				log.Warn().Uint64("gas", txService.Gas()).Interface("limit", node.Wallet.MaxFees).Msg("Gas limit exceeded, using maxFees instead")
+				fees = node.Wallet.MaxFees.Number
 			}
 			txOptions := cosmosclient.TxOptions{ // nolint: exhaustruct
-				Fees: fmt.Sprintf("%duallo", fees),
+				Fees: fmt.Sprintf("%suallo", fees.String()),
 			}
 			log.Info().Str("fees", txOptions.Fees).Msg("Attempting tx with calculated fees")
 			txService, err = node.Chain.Client.CreateTxWithOptions(ctx, node.Chain.Account, txOptions, req)

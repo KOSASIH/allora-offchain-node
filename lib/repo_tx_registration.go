@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rs/zerolog/log"
-
-	cosmossdk_io_math "cosmossdk.io/math"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
+	"github.com/rs/zerolog/log"
 )
 
 // True if the actor is ultimately, definitively registered for the specified topic, else False
@@ -149,9 +147,17 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 		return false, err
 	}
 
-	minStake := cosmossdk_io_math.NewInt(config.MinStake)
+	minStake := config.MinStake.Number
+	if minStake.IsNil() {
+		log.Info().Msg("No minimum stake configured in reputer, skipping adding stake.")
+		return true, nil
+	}
+	if minStake.IsZero() {
+		log.Info().Msg("No minimum stake requested, skipping adding stake.")
+		return true, nil
+	}
 	if minStake.LTE(stake) {
-		log.Info().Msg("Stake above minimum requested stake, skipping adding stake.")
+		log.Info().Interface("stake", stake).Interface("minStake", minStake).Msg("Stake above minimum requested stake, skipping adding stake.")
 		return true, nil
 	} else {
 		log.Info().Interface("stake", stake).Interface("minStake", minStake).Interface("stakeToAdd", minStake.Sub(stake)).Msg("Stake below minimum requested stake, adding stake.")

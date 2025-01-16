@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 
-## [Unreleased]
+## v0.8.1
 
 ### Added
 
@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+
+* [#107](https://github.com/allora-network/allora-offchain-node/pull/107) uallo values to get over uint64 (eg minStake)
 
 ### Removed
 
