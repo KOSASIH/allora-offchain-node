@@ -20,6 +20,7 @@ func (node *NodeConfig) GetLatestOpenWorkerNonceByTopicId(ctx context.Context, t
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"get open worker nonce",
+		node,
 	)
 	if err != nil {
 		return &emissionstypes.Nonce{}, err // nolint: exhaustruct
@@ -45,6 +46,7 @@ func (node *NodeConfig) GetOldestReputerNonceByTopicId(ctx context.Context, topi
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"get open reputer nonce",
+		node,
 	)
 	if err != nil {
 		return &emissionstypes.Nonce{}, err // nolint: exhaustruct

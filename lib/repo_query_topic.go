@@ -21,6 +21,7 @@ func (node *NodeConfig) GetTopicInfo(ctx context.Context, topicId emissionstypes
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"get topic info",
+		node,
 	)
 	if err != nil {
 		return nil, err

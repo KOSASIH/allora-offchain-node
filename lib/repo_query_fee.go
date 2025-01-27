@@ -34,6 +34,7 @@ func (node *NodeConfig) GetBaseFee(ctx context.Context) (float64, error) {
 		},
 		query.PageRequest{}, // nolint:exhaustruct
 		"get base fee",
+		node,
 	)
 	if err != nil {
 		return 0, err
@@ -46,6 +47,6 @@ func (node *NodeConfig) GetBaseFee(ctx context.Context) (float64, error) {
 		return 0, fmt.Errorf("failed to parse base fee: %w", err)
 	}
 
-	log.Debug().Float64("baseFee", baseFee).Msg("Retrieved base fee from chain")
+	log.Trace().Str("rpc", node.RPC).Float64("baseFee", baseFee).Msg("Retrieved base fee from chain")
 	return baseFee, nil
 }

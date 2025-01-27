@@ -23,7 +23,7 @@ import (
 	jsonrpc "github.com/cometbft/cometbft/rpc/jsonrpc/client"
 )
 
-func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
+func getAlloraClient(config *UserConfig, rpc string) (*cosmosclient.Client, error) {
 	// create a allora client instance
 	ctx := context.Background()
 	userHomeDir, _ := os.UserHomeDir()
@@ -37,13 +37,12 @@ func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
 		log.Info().Msg("Home directory does not exist, creating...")
 		err = os.MkdirAll(alloraClientHome, 0755)
 		if err != nil {
-			config.Wallet.SubmitTx = false
 			return nil, errorsmod.Wrap(err, "cannot create allora client home directory")
 		}
 		log.Info().Str("home", alloraClientHome).Msg("Allora client home directory created")
 	}
 
-	httpClient, err := jsonrpc.DefaultHTTPClient(config.Wallet.NodeRpc)
+	httpClient, err := jsonrpc.DefaultHTTPClient(rpc)
 	if err != nil {
 		return nil, fmt.Errorf("error creating default http client")
 	}
@@ -61,13 +60,13 @@ func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
 		return nil, fmt.Errorf("unexpected transport type: %T", httpClient.Transport)
 	}
 
-	rpcClient, err := rpchttp.NewWithClient(config.Wallet.NodeRpc, "/websocket", httpClient)
+	rpcClient, err := rpchttp.NewWithClient(rpc, "/websocket", httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("error creating rpc client")
 	}
 
 	client, err := cosmosclient.New(ctx,
-		cosmosclient.WithNodeAddress(config.Wallet.NodeRpc),
+		cosmosclient.WithNodeAddress(rpc),
 		cosmosclient.WithAddressPrefix(ADDRESS_PREFIX),
 		cosmosclient.WithHome(alloraClientHome),
 		cosmosclient.WithGas(config.Wallet.Gas),
@@ -76,16 +75,14 @@ func getAlloraClient(config *UserConfig) (*cosmosclient.Client, error) {
 		cosmosclient.WithRPCClient(rpcClient),
 	)
 	if err != nil {
-		config.Wallet.SubmitTx = false
 		return nil, err
 	}
 	return &client, nil
 }
 
-func (c *UserConfig) GenerateNodeConfig() (*NodeConfig, error) {
-	client, err := getAlloraClient(c)
+func (c *UserConfig) GenerateNodeConfig(rpc string) (*NodeConfig, error) {
+	client, err := getAlloraClient(c, rpc)
 	if err != nil {
-		c.Wallet.SubmitTx = false
 		return nil, err
 	}
 	var account *cosmosaccount.Account
@@ -94,7 +91,6 @@ func (c *UserConfig) GenerateNodeConfig() (*NodeConfig, error) {
 		// get account from the keyring
 		acc, err := client.Account(c.Wallet.AddressKeyName)
 		if err != nil {
-			c.Wallet.SubmitTx = false
 			log.Error().Err(err).Msg("could not retrieve account from keyring")
 		} else {
 			account = &acc
@@ -106,9 +102,7 @@ func (c *UserConfig) GenerateNodeConfig() (*NodeConfig, error) {
 			if err.Error() == "account already exists" {
 				acc, err = client.Account(c.Wallet.AddressKeyName)
 			}
-
 			if err != nil {
-				c.Wallet.SubmitTx = false
 				log.Err(err).Msg("could not restore account from mnemonic")
 			} else {
 				account = &acc
@@ -126,10 +120,7 @@ func (c *UserConfig) GenerateNodeConfig() (*NodeConfig, error) {
 
 	address, err := account.Address(ADDRESS_PREFIX)
 	if err != nil {
-		c.Wallet.SubmitTx = false
 		log.Err(err).Msg("could not retrieve allora blockchain address, transactions will not be submitted to chain")
-	} else {
-		log.Info().Str("address", address).Msg("allora blockchain address loaded")
 	}
 
 	// Create query client
@@ -148,8 +139,7 @@ func (c *UserConfig) GenerateNodeConfig() (*NodeConfig, error) {
 
 	c.Wallet.Address = address // Overwrite the address with the one from the keystore
 
-	log.Info().Msg("Allora client created successfully")
-	log.Info().Msg("Wallet address: " + address)
+	log.Info().Str("rpc", rpc).Str("address", address).Msg("Allora client created successfully")
 
 	alloraChain := ChainConfig{
 		Address:              address,
@@ -163,6 +153,7 @@ func (c *UserConfig) GenerateNodeConfig() (*NodeConfig, error) {
 	}
 
 	Node := NodeConfig{
+		RPC:     rpc,
 		Chain:   alloraChain,
 		Wallet:  c.Wallet,
 		Worker:  c.Worker,

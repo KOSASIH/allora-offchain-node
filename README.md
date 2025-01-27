@@ -160,6 +160,13 @@ The node will use the following timeouts:
 * `timeoutRPCSecondsRegistration`: Timeout for whole RPC registration process in seconds, including retries.
 * `timeoutHTTPConnection`: Timeout for HTTP connection (underlying to the RPC client) in seconds.
 
+### RPC nodes
+
+From v0.7.1, the RPC nodes to connect to are configured as an array `nodeRpcs` in the config.json file, instead of a single string.
+The offchain node will try to connect to the RPC nodes in order of appearance in the array  .
+If the node is unable to connect to an RPC node, or the node has some particular type of error(e.g. a full mempool, or a `429 Too Many Requests` error), it will switch to the next one in the array.
+If the node has tried all the RPC nodes in the array, and there was an error, it will log an error for that submission and will not try to submit that payload again.
+
 ### Error handling
 
 Error handling is done differently for different types of errors.

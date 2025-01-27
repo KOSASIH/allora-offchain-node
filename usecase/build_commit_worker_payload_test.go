@@ -121,8 +121,17 @@ func TestComputeWorkerBundle(t *testing.T) {
 			tt.workerConfig.InferenceEntrypoint = mockAdapter
 			tt.workerConfig.ForecastEntrypoint = mockAdapter
 
-			suite := &UseCaseSuite{} // nolint: exhaustruct
-			suite.Node.Wallet.Address = tt.address
+			// Replace RPCManager creation with mock
+			mockRPCManager := &MockRPCManager{} //nolint:exhaustruct
+			mockNodeConfig := &lib.NodeConfig{  //nolint:exhaustruct
+				Wallet: lib.WalletConfig{ //nolint:exhaustruct
+					Address: tt.address,
+				},
+			}
+			mockRPCManager.On("GetCurrentNode").Return(mockNodeConfig)
+			suite := &UseCaseSuite{RPCManager: mockRPCManager} // nolint: exhaustruct
+
+			suite.RPCManager.GetCurrentNode().Wallet.Address = tt.address
 			response, err := suite.BuildWorkerPayload(tt.workerConfig, 1)
 			if tt.expectError {
 				require.Error(t, err)

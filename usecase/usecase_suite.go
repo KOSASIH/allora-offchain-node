@@ -5,8 +5,9 @@ import (
 )
 
 type UseCaseSuite struct {
-	Node    lib.NodeConfig
-	Metrics lib.Metrics
+	UserConfig lib.UserConfig
+	RPCManager RPCManagerInterface
+	Metrics    lib.Metrics
 }
 
 // Static method to create a new UseCaseSuite
@@ -15,11 +16,10 @@ func NewUseCaseSuite(userConfig lib.UserConfig) (*UseCaseSuite, error) {
 	if err != nil {
 		return nil, err
 	}
-	userConfig.CheckAndSetDefaults()
-	nodeConfig, err := userConfig.GenerateNodeConfig()
+
+	rpcManager, err := NewRPCManager(userConfig)
 	if err != nil {
 		return nil, err
 	}
-
-	return &UseCaseSuite{Node: *nodeConfig}, nil // nolint: exhaustruct
+	return &UseCaseSuite{UserConfig: userConfig, RPCManager: rpcManager}, nil // nolint: exhaustruct
 }

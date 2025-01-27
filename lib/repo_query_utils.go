@@ -2,8 +2,8 @@ package lib
 
 import (
 	"context"
-	"fmt"
 
+	errorsmod "cosmossdk.io/errors"
 	"github.com/rs/zerolog/log"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
@@ -17,6 +17,7 @@ func QueryDataWithRetry[T any](
 	queryFunc func(context.Context, query.PageRequest) (T, error),
 	req query.PageRequest,
 	infoMsg string,
+	node *NodeConfig,
 ) (T, error) {
 	var result T
 	var err error
@@ -31,6 +32,34 @@ func QueryDataWithRetry[T any](
 		// Log the error for each retry.
 		log.Error().Err(err).Msgf("Query failed, retrying... (Retry %d/%d): %s", retryCount, maxRetries, infoMsg)
 
+		errorResponse, err := ProcessErrorTx(ctx, err, infoMsg, retryCount, node.Wallet.MaxRetries, node)
+		switch errorResponse {
+		case ErrorProcessingOk:
+			return result, nil
+		case ErrorProcessingError:
+			// if error has not been handled, sleep and retry with regular delay
+			if err != nil {
+				log.Error().Err(err).Str("rpc", node.RPC).Str("msg", infoMsg).Msgf("Failed, retrying... (Retry %d/%d)", retryCount, node.Wallet.MaxRetries)
+				// Wait for the uniform delay before retrying
+				if DoneOrWait(ctx, node.Wallet.RetryDelay) {
+					return result, ctx.Err()
+				}
+				continue
+			}
+		case ErrorProcessingContinue:
+			// Error has not been handled, just continue next iteration
+			continue
+		case ErrorProcessingFees:
+			log.Debug().Msg("Query failed due to fees limit")
+			return result, err
+		case ErrorProcessingFailure:
+			return result, errorsmod.Wrapf(err, "query failed and not retried")
+		case ErrorProcessingSwitchingNode:
+			return result, err
+		default:
+			return result, errorsmod.Wrapf(err, "failed to process error")
+		}
+
 		// Wait for the uniform delay before retrying
 		if DoneOrWait(ctx, delaySeconds) {
 			break
@@ -38,5 +67,5 @@ func QueryDataWithRetry[T any](
 	}
 
 	// All retries failed, return the last error
-	return result, fmt.Errorf("query failed after %d retries: %w", maxRetries, err)
+	return result, err
 }

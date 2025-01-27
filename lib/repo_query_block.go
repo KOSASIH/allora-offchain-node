@@ -20,6 +20,7 @@ func (node *NodeConfig) GetReputerValuesAtBlock(ctx context.Context, topicId emi
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"get reputer values at block",
+		node,
 	)
 	if err != nil {
 		return &emissionstypes.ValueBundle{}, err

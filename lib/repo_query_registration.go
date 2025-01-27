@@ -26,6 +26,7 @@ func (node *NodeConfig) IsWorkerRegistered(ctx context.Context, topicId uint64) 
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"is worker registered in topic",
+		node,
 	)
 	if err != nil {
 		return false, err
@@ -52,6 +53,7 @@ func (node *NodeConfig) IsReputerRegistered(ctx context.Context, topicId uint64)
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"is reputer registered in topic",
+		node,
 	)
 	if err != nil {
 		return false, err

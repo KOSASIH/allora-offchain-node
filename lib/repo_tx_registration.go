@@ -2,7 +2,6 @@ package lib
 
 import (
 	"context"
-	"fmt"
 
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
 	"github.com/rs/zerolog/log"
@@ -11,12 +10,12 @@ import (
 // True if the actor is ultimately, definitively registered for the specified topic, else False
 // Idempotent in registration
 func (node *NodeConfig) RegisterWorkerIdempotently(ctx context.Context, config WorkerConfig) (bool, error) {
-	log := log.With().Str("rpc", node.Wallet.NodeRpc).Uint64("topicId", config.TopicId).Str("actorType", "worker").Logger()
+	log := log.With().Uint64("topicId", config.TopicId).Str("actorType", "worker").Logger()
 	log.Info().Msg("Registering worker")
 
 	isRegistered, err := node.IsWorkerRegistered(ctx, config.TopicId)
 	if err != nil {
-		log.Error().Err(err).Str("rpc", node.Wallet.NodeRpc).Msg("Could not check if the node is already registered for topic as worker, skipping")
+		log.Error().Err(err).Str("rpc", node.RPC).Msg("Could not check if the node is already registered for topic as worker, skipping")
 		return false, err
 	}
 	if isRegistered {
@@ -28,7 +27,7 @@ func (node *NodeConfig) RegisterWorkerIdempotently(ctx context.Context, config W
 
 	moduleParams, err := node.Chain.EmissionsQueryClient.GetParams(ctx, &emissionstypes.GetParamsRequest{})
 	if err != nil {
-		log.Error().Err(err).Msg("Could not get chain params for node")
+		log.Error().Err(err).Msg("Could not get chain params")
 		return false, err
 	}
 
@@ -39,7 +38,7 @@ func (node *NodeConfig) RegisterWorkerIdempotently(ctx context.Context, config W
 	}
 	if !balance.GTE(moduleParams.Params.RegistrationFee) {
 		log.Error().Str("balance", balance.String()).Msg("Node does not have enough balance to register, skipping.")
-		return false, fmt.Errorf("Node does not have enough balance to register, skipping")
+		return false, ErrNotEnoughBalance
 	}
 
 	msg := &emissionstypes.RegisterRequest{
@@ -50,6 +49,10 @@ func (node *NodeConfig) RegisterWorkerIdempotently(ctx context.Context, config W
 	}
 	res, err := node.SendDataWithRetry(ctx, msg, "Register node", 0)
 	if err != nil {
+		if IsErrorSwitchingNode(err) {
+			log.Warn().Err(err).Str("rpc", node.RPC).Msg("Error on worker registration process, switching to next node")
+			return false, err
+		}
 
 		txHash := ""
 		if res != nil {
@@ -62,7 +65,7 @@ func (node *NodeConfig) RegisterWorkerIdempotently(ctx context.Context, config W
 	// Give time for the tx to be included in a block
 	log.Debug().Int64("delay", node.Wallet.RetryDelay).Msg("Waiting to check registration status to be included in a block...")
 	if DoneOrWait(ctx, node.Wallet.RetryDelay) {
-		log.Error().Err(ctx.Err()).Msg("Waiting to check registration status failed")
+		log.Error().Err(ctx.Err()).Str("rpc", node.RPC).Msg("Waiting to check registration status failed")
 		return false, ctx.Err()
 	}
 	isRegistered, err = node.IsWorkerRegistered(ctx, config.TopicId)
@@ -78,12 +81,12 @@ func (node *NodeConfig) RegisterWorkerIdempotently(ctx context.Context, config W
 // Actor may be either a worker or a reputer
 // Idempotent in registration and stake addition
 func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context, config ReputerConfig) (bool, error) {
-	log := log.With().Str("rpc", node.Wallet.NodeRpc).Uint64("topicId", config.TopicId).Str("actorType", "reputer").Logger()
+	log := log.With().Uint64("topicId", config.TopicId).Str("actorType", "reputer").Logger()
 	log.Info().Msg("Registering reputer")
 
 	isRegistered, err := node.IsReputerRegistered(ctx, config.TopicId)
 	if err != nil {
-		log.Error().Err(err).Msg("Could not check if the node is already registered for topic as reputer, skipping")
+		log.Error().Err(err).Str("rpc", node.RPC).Msg("Could not check if the node is already registered for topic as reputer, skipping")
 		return false, err
 	}
 
@@ -99,12 +102,12 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 		}
 		moduleParams, err := node.Chain.EmissionsQueryClient.GetParams(ctx, &emissionstypes.GetParamsRequest{})
 		if err != nil {
-			log.Error().Err(err).Msg("Could not get chain params for reputer")
+			log.Error().Err(err).Str("rpc", node.RPC).Msg("Could not get chain params for reputer")
 			return false, err
 		}
 		if !balance.GTE(moduleParams.Params.RegistrationFee) {
 			log.Error().Msg("Node does not have enough balance to register, skipping.")
-			return false, fmt.Errorf("Node does not have enough balance to register, skipping")
+			return false, ErrNotEnoughBalance
 		}
 
 		msgRegister := &emissionstypes.RegisterRequest{
@@ -115,7 +118,10 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 		}
 		res, err := node.SendDataWithRetry(ctx, msgRegister, "Register node", 0)
 		if err != nil {
-
+			if IsErrorSwitchingNode(err) {
+				log.Warn().Err(err).Str("rpc", node.RPC).Msg("Error on reputer registration process, switching to next node")
+				return false, err
+			}
 			txHash := ""
 			if res != nil {
 				txHash = res.TxHash
@@ -127,7 +133,7 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 		// Give time for the tx to be included in a block
 		log.Debug().Int64("delay", node.Wallet.RetryDelay).Msg("Waiting to check registration status to be included in a block...")
 		if DoneOrWait(ctx, node.Wallet.RetryDelay) {
-			log.Error().Err(ctx.Err()).Msg("Waiting to check registration status failed")
+			log.Error().Err(ctx.Err()).Str("rpc", node.RPC).Msg("Waiting to check registration status failed")
 			return false, ctx.Err()
 		}
 		isRegistered, err = node.IsReputerRegistered(ctx, config.TopicId)
@@ -137,7 +143,7 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 		}
 		if !isRegistered {
 			log.Error().Msg("Node not registered after all retries")
-			return false, fmt.Errorf("Node not registered after all retries")
+			return false, ErrNotRegistered
 		}
 	}
 
@@ -170,6 +176,12 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 	}
 	res, err := node.SendDataWithRetry(ctx, msgAddStake, "Add stake", 0)
 	if err != nil {
+		// Necessary to switch to next node if we get a 429 error handling control to caller
+		if IsErrorSwitchingNode(err) {
+			log.Warn().Err(err).Str("rpc", node.RPC).Msg("Error adding stake, switching to next node")
+			return false, err
+		}
+
 		txHash := ""
 		if res != nil {
 			txHash = res.TxHash
@@ -181,7 +193,7 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 	// Give time for the tx to be included in a block
 	log.Debug().Int64("delay", node.Wallet.RetryDelay).Msg("Waiting to check stake status to be included in a block...")
 	if DoneOrWait(ctx, node.Wallet.RetryDelay) {
-		log.Error().Err(ctx.Err()).Msg("Waiting to check stake status failed")
+		log.Error().Err(ctx.Err()).Str("rpc", node.RPC).Msg("Waiting to check stake status failed")
 		return false, ctx.Err()
 	}
 	stake, err = node.GetReputerStakeInTopic(ctx, config.TopicId, node.Chain.Address)
@@ -191,7 +203,7 @@ func (node *NodeConfig) RegisterAndStakeReputerIdempotently(ctx context.Context,
 	}
 	if stake.LT(minStake) {
 		log.Error().Interface("stake", stake).Interface("minStake", minStake).Msg("Stake below minimum requested stake, skipping.")
-		return false, fmt.Errorf("Stake below minimum requested stake, skipping")
+		return false, ErrStakeBelowMin
 	}
 
 	return true, nil

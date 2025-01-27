@@ -21,26 +21,34 @@ import (
 func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, reputer lib.ReputerConfig, nonce lib.BlockHeight, timeoutHeight uint64) error {
 	log := log.With().Uint64("topicId", reputer.TopicId).Str("actorType", "reputer").Logger()
 	log.Info().Msg("Building reputer payload")
-	valueBundle, err := suite.Node.GetReputerValuesAtBlock(ctx, reputer.TopicId, nonce)
+
+	valueBundle, err := RunWithNodeRetry(
+		ctx,
+		suite.RPCManager,
+		func(node *lib.NodeConfig) (*emissionstypes.ValueBundle, error) {
+			return node.GetReputerValuesAtBlock(ctx, reputer.TopicId, nonce)
+		},
+		"get reputer values",
+	)
 	if err != nil {
 		return errorsmod.Wrapf(err, "error getting reputer values, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
 	}
 	valueBundle.ReputerRequestNonce = &emissionstypes.ReputerRequestNonce{
 		ReputerNonce: &emissionstypes.Nonce{BlockHeight: nonce},
 	}
-	valueBundle.Reputer = suite.Node.Wallet.Address
+	valueBundle.Reputer = suite.RPCManager.GetCurrentNode().Wallet.Address
 
 	sourceTruth, err := reputer.GroundTruthEntrypoint.GroundTruth(reputer, nonce)
 	if err != nil {
 		return errorsmod.Wrapf(err, "error getting source truth from reputer, topicId: %d, blockHeight: %d", reputer.TopicId, nonce)
 	}
-	suite.Metrics.IncrementMetricsCounter(lib.TruthRequestCount, suite.Node.Chain.Address, reputer.TopicId)
+	suite.Metrics.IncrementMetricsCounter(lib.TruthRequestCount, suite.RPCManager.GetCurrentNode().Chain.Address, reputer.TopicId)
 
 	lossBundle, err := suite.ComputeLossBundle(sourceTruth, valueBundle, reputer)
 	if err != nil {
 		return errorsmod.Wrapf(err, "error computing loss bundle, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
 	}
-	suite.Metrics.IncrementMetricsCounter(lib.ReputerDataBuildCount, suite.Node.Chain.Address, reputer.TopicId)
+	suite.Metrics.IncrementMetricsCounter(lib.ReputerDataBuildCount, suite.RPCManager.GetCurrentNode().Chain.Address, reputer.TopicId)
 
 	signedValueBundle, err := suite.SignReputerValueBundle(&lossBundle)
 	if err != nil {
@@ -52,7 +60,7 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 	}
 
 	req := &emissionstypes.InsertReputerPayloadRequest{
-		Sender:             suite.Node.Wallet.Address,
+		Sender:             suite.RPCManager.GetCurrentNode().Wallet.Address,
 		ReputerValueBundle: signedValueBundle,
 	}
 	reqJSON, err := json.Marshal(req)
@@ -61,12 +69,13 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 	} else {
 		log.Debug().Msgf("Sending InsertReputerPayload to chain %s", string(reqJSON))
 	}
-	if suite.Node.Wallet.SubmitTx {
-		_, err = suite.Node.SendDataWithRetry(ctx, req, "Send Reputer Data to chain", timeoutHeight)
+
+	if suite.RPCManager.GetCurrentNode().Wallet.SubmitTx {
+		_, err = suite.RPCManager.SendDataWithNodeRetry(ctx, req, timeoutHeight, "Send Reputer Data to chain")
 		if err != nil {
 			return errorsmod.Wrapf(err, "error sending Reputer Data to chain, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
 		}
-		suite.Metrics.IncrementMetricsCounter(lib.ReputerChainSubmissionCount, suite.Node.Chain.Address, reputer.TopicId)
+		suite.Metrics.IncrementMetricsCounter(lib.ReputerChainSubmissionCount, suite.RPCManager.GetCurrentNode().Chain.Address, reputer.TopicId)
 	} else {
 		log.Info().Msg("SubmitTx=false; Skipping sending Reputer Data to chain")
 	}
@@ -209,7 +218,8 @@ func (suite *UseCaseSuite) SignReputerValueBundle(valueBundle *emissionstypes.Va
 	if err != nil {
 		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error marshalling valueBundle")
 	}
-	sig, pk, err := suite.Node.Chain.Client.Context().Keyring.Sign(suite.Node.Chain.Account.Name, protoBytesIn, signing.SignMode_SIGN_MODE_DIRECT)
+	sig, pk, err := suite.RPCManager.GetCurrentNode().Chain.Client.Context().Keyring.
+		Sign(suite.RPCManager.GetCurrentNode().Chain.Account.Name, protoBytesIn, signing.SignMode_SIGN_MODE_DIRECT)
 	if err != nil {
 		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error signing valueBundle")
 	}

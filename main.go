@@ -109,6 +109,7 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to convert Entrypoints to instances of adapters - wrong entrypoint name?")
 		return
 	}
+
 	spawner, err := usecase.NewUseCaseSuite(finalUserConfig)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize use case, exiting")

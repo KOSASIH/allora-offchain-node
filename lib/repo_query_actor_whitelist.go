@@ -21,6 +21,7 @@ func (node *NodeConfig) CanSubmitWorker(ctx context.Context, topicId emissionsty
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"check worker whitelist",
+		node,
 	)
 	if err != nil {
 		return false, err
@@ -44,6 +45,7 @@ func (node *NodeConfig) CanSubmitReputer(ctx context.Context, topicId emissionst
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"check reputer whitelist",
+		node,
 	)
 	if err != nil {
 		return false, err

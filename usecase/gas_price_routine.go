@@ -11,23 +11,30 @@ import (
 
 // UpdateGasPriceRoutine continuously updates the gas price at a specified interval
 func (suite *UseCaseSuite) UpdateGasPriceRoutine(ctx context.Context) {
-	log.Info().Msg("Starting gas price routine")
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info().Msg("Updating fee price routine: terminating.")
 			return
 		default:
-			price, err := WithTimeoutResult(ctx, time.Duration(suite.Node.Wallet.TimeoutRPCSecondsQuery)*time.Second,
-				func(ctx context.Context) (float64, error) {
-					return suite.Node.GetBaseFee(ctx)
-				})
+			price, err := RunWithNodeRetry(
+				ctx,
+				suite.RPCManager,
+				func(node *lib.NodeConfig) (float64, error) {
+					return WithTimeoutResult(ctx,
+						time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+						func(ctx context.Context) (float64, error) {
+							return suite.RPCManager.GetCurrentNode().GetBaseFee(ctx)
+						})
+				},
+				"get base fee",
+			)
 			if err != nil {
 				log.Error().Err(err).Msg("Error updating gas prices")
 			}
 			lib.SetGasPrice(price)
 			log.Debug().Float64("gasPrice", lib.GetGasPrice()).Msg("Updating fee price routine: updating value.")
-			time.Sleep(time.Duration(suite.Node.Wallet.GasPriceUpdateInterval) * time.Second)
+			time.Sleep(time.Duration(suite.RPCManager.GetCurrentNode().Wallet.GasPriceUpdateInterval) * time.Second)
 		}
 	}
 }

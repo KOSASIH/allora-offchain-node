@@ -26,6 +26,7 @@ func (node *NodeConfig) GetReputerStakeInTopic(
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"get reputer stake in topic",
+		node,
 	)
 	if err != nil {
 		return cosmossdk_io_math.Int{}, err

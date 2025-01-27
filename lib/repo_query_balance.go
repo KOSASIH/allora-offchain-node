@@ -21,6 +21,7 @@ func (node *NodeConfig) GetBalance(ctx context.Context) (cosmossdk_io_math.Int, 
 		},
 		query.PageRequest{}, // nolint: exhaustruct
 		"get balance",
+		node,
 	)
 	if err != nil {
 		return cosmossdk_io_math.Int{}, err

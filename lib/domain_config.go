@@ -42,7 +42,7 @@ type WalletConfig struct {
 	GasPrices                     string                  // gas prices to use for the allora client - "auto" for auto-calculated fees
 	GasPriceUpdateInterval        int64                   // number of seconds to wait between updates to the gas price
 	MaxFees                       FlexibleCosmosIntAmount // max fees to pay for a single transaction (as string or number)
-	NodeRpc                       string                  // rpc node for allora chain
+	NodeRPCs                      []string                // rpc nodes for allora chain
 	MaxRetries                    int64                   // retry to get data from chain up to this many times per query or tx
 	RetryDelay                    int64                   // number of seconds to wait between retries (general case)
 	AccountSequenceRetryDelay     int64                   // number of seconds to wait between retries in case of account sequence error
@@ -118,6 +118,7 @@ type UserConfig struct {
 }
 
 type NodeConfig struct {
+	RPC     string
 	Chain   ChainConfig
 	Wallet  WalletConfig
 	Worker  []WorkerConfig
@@ -222,8 +223,15 @@ func (c *UserConfig) ValidateWalletConfig() error {
 }
 
 func (reputerConfig *ReputerConfig) ValidateReputerConfig() error {
-	if reputerConfig.GroundTruthEntrypoint != nil && !reputerConfig.GroundTruthEntrypoint.CanSourceGroundTruthAndComputeLoss() {
-		return errors.New("invalid loss entrypoint")
+	if reputerConfig.GroundTruthEntrypointName == "" ||
+		reputerConfig.GroundTruthEntrypoint == nil ||
+		(reputerConfig.GroundTruthEntrypoint != nil &&
+			!reputerConfig.GroundTruthEntrypoint.CanSourceGroundTruthAndComputeLoss()) {
+		return errors.New("invalid ground truth entrypoint")
+	}
+	if reputerConfig.LossFunctionEntrypointName == "" ||
+		reputerConfig.LossFunctionEntrypoint == nil {
+		return errors.New("invalid loss function entrypoint")
 	}
 	return nil
 }
