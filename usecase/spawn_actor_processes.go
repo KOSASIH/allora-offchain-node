@@ -2,8 +2,10 @@ package usecase
 
 import (
 	"allora_offchain_node/lib"
+	"allora_offchain_node/metrics"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"sync"
@@ -11,7 +13,6 @@ import (
 
 	errorsmod "cosmossdk.io/errors"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
-	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/exp/rand"
 )
@@ -46,34 +47,41 @@ type ActorProcessParams[T lib.TopicActor] struct {
 	ActorType string
 }
 
-// Spawns the actor processes and any associated non-essential routines
-func (suite *UseCaseSuite) Spawn(ctx context.Context) {
-	if suite.RPCManager.GetCurrentNode().Wallet.GasPrices == lib.AutoGasPrices {
-		log.Info().Msg("auto gas prices. Updating fee price routine: starting.")
-		price, err := WithTimeoutResult(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
-			func(ctx context.Context) (float64, error) {
-				return RunWithNodeRetry(
-					ctx,
-					suite.RPCManager,
-					func(node *lib.NodeConfig) (float64, error) {
-						return node.GetBaseFee(ctx)
-					},
-					"get base fee",
-				)
-			})
+// launchGasRoutine initializes gas prices and starts the auto-update routine if needed
+func (suite *UseCaseSuite) launchGasRoutine(ctx context.Context, walletConfig *lib.WalletConfig, wallet *lib.Wallet) error {
+	// Initialize gas prices explicitly first
+	err := suite.UpdateGasPrice(ctx, wallet, walletConfig)
+	if err != nil {
+		log.Error().Err(err).Msg("Error updating gas prices in auto mode - RPC availability issue?")
+		return err
+	}
+	// After initialization, start auto-update routine
+	go suite.UpdateGasPriceRoutine(ctx, wallet, walletConfig)
+	return nil
+}
 
-		if err != nil {
-			log.Error().Err(err).Msg("Error updating gas prices in auto mode - RPC availability issue?")
-			return
+// Spawns the actor processes and any associated non-essential routines
+func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
+
+	wallet, err := suite.ConnectionManager.GetWallet()
+	if err != nil {
+		log.Error().Err(err).Msg("Error getting wallet")
+		return err
+	}
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Error getting wallet config")
+		return err
+	}
+	if walletConfig.GasPrices == lib.AutoGasPrices {
+		if err := suite.launchGasRoutine(ctx, walletConfig, wallet); err != nil {
+			return err
 		}
-		lib.SetGasPrice(price)
-		// After intialization, start auto-update routine
-		go suite.UpdateGasPriceRoutine(ctx)
 	} else {
-		price, err := strconv.ParseFloat(suite.RPCManager.GetCurrentNode().Wallet.GasPrices, 64)
+		price, err := strconv.ParseFloat(walletConfig.GasPrices, 64)
 		if err != nil {
 			log.Error().Err(err).Msg("Invalid gas prices format")
-			return
+			return err
 		} else {
 			log.Debug().Float64("gasPrice", price).Msg("Setting gas prices manually")
 			lib.SetGasPrice(price)
@@ -85,7 +93,7 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) {
 
 	// Run worker process per topic
 	alreadyStartedWorkerForTopic := make(map[emissionstypes.TopicId]bool)
-	for _, worker := range suite.RPCManager.GetCurrentNode().Worker {
+	for _, worker := range suite.UserConfig.Worker {
 		if _, ok := alreadyStartedWorkerForTopic[worker.TopicId]; ok {
 			log.Warn().Uint64("topicId", worker.TopicId).Msg("Worker already started for topicId")
 			continue
@@ -95,14 +103,25 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) {
 		wg.Add(1)
 		go func(worker lib.WorkerConfig) {
 			defer wg.Done()
-			suite.runWorkerProcess(ctx, worker)
-			log.Error().Uint64("topicId", worker.TopicId).Err(ctx.Err()).Msg("Worker process finished")
+			select {
+			case <-ctx.Done():
+				log.Info().Uint64("topicId", worker.TopicId).Msg("Worker process received shutdown signal")
+				return
+			default:
+				suite.runWorkerProcess(ctx, worker)
+			}
+			log.Info().Uint64("topicId", worker.TopicId).Msg("Worker process finished")
 		}(worker)
+
+		if lib.DoneOrWait(ctx, walletConfig.LaunchRoutineDelay) {
+			log.Error().Msg("Worker process finished")
+			suite.Metrics.IncrementMetricsCounter(metrics.WorkerProcessFinishedCount, wallet.Address, worker.TopicId)
+		}
 	}
 
 	// Run reputer process per topic
 	alreadyStartedReputerForTopic := make(map[emissionstypes.TopicId]bool)
-	for _, reputer := range suite.RPCManager.GetCurrentNode().Reputer {
+	for _, reputer := range suite.UserConfig.Reputer {
 		if _, ok := alreadyStartedReputerForTopic[reputer.TopicId]; ok {
 			log.Warn().Uint64("topicId", reputer.TopicId).Msg("Reputer already started for topicId")
 			continue
@@ -112,27 +131,52 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) {
 		wg.Add(1)
 		go func(reputer lib.ReputerConfig) {
 			defer wg.Done()
-			suite.runReputerProcess(ctx, reputer)
-			log.Error().Uint64("topicId", reputer.TopicId).Err(ctx.Err()).Msg("Reputer process finished")
+			select {
+			case <-ctx.Done():
+				log.Info().Uint64("topicId", reputer.TopicId).Msg("Reputer process received shutdown signal")
+				return
+			default:
+				suite.runReputerProcess(ctx, reputer)
+			}
+			log.Info().Uint64("topicId", reputer.TopicId).Msg("Reputer process finished")
 		}(reputer)
+
+		if lib.DoneOrWait(ctx, walletConfig.LaunchRoutineDelay) {
+			log.Error().Msg("Reputer process finished")
+			suite.Metrics.IncrementMetricsCounter(metrics.ReputerProcessFinishedCount, wallet.Address, reputer.TopicId)
+		}
 	}
 
 	// Wait for all essential routines to finish
 	go func() {
 		wg.Wait()
+		log.Info().Msg("All essential routines finished")
 		close(essentialDone)
 	}()
 
 	<-essentialDone // Block until all essential routines are done
+	return nil
 }
 
 // Attempts to build and commit a worker payload for a given nonce
 // Returns the nonce height acted upon (the received one or the new one if any)
 func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.WorkerConfig, latestNonceHeightActedUpon int64, timeoutHeight uint64) (int64, error) {
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return 0, errorsmod.Wrapf(err, "Error getting wallet config")
+	}
+	wallet, err := suite.ConnectionManager.GetWallet()
+	if err != nil {
+		return 0, errorsmod.Wrapf(err, "Error getting wallet")
+	}
 	// Get latest nonce with RPC timeout
-	latestOpenWorkerNonce, err := WithTimeoutResult(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+	latestOpenWorkerNonce, err := WithTimeoutResult(ctx, time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 		func(ctx context.Context) (*emissionstypes.Nonce, error) {
-			return suite.RPCManager.GetCurrentNode().GetLatestOpenWorkerNonceByTopicId(ctx, worker.TopicId)
+			node, err := suite.ConnectionManager.GetCurrentQueryNode()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get current query node: %w", err)
+			}
+			return node.GetLatestOpenWorkerNonceByTopicId(ctx, worker.TopicId)
 		})
 
 	if err != nil {
@@ -142,9 +186,13 @@ func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.
 
 	if latestOpenWorkerNonce.BlockHeight > latestNonceHeightActedUpon {
 		// Check whitelist with RPC timeout
-		isWhitelisted, err := WithTimeoutResult(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+		isWhitelisted, err := WithTimeoutResult(ctx, time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 			func(ctx context.Context) (bool, error) {
-				return suite.RPCManager.GetCurrentNode().CanSubmitWorker(ctx, worker.TopicId, suite.RPCManager.GetCurrentNode().Wallet.Address)
+				node, err := suite.ConnectionManager.GetCurrentQueryNode()
+				if err != nil {
+					return false, fmt.Errorf("failed to get current query node: %w", err)
+				}
+				return node.CanSubmitWorker(ctx, worker.TopicId, wallet.Address)
 			})
 
 		if err != nil {
@@ -157,7 +205,7 @@ func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.
 		}
 
 		// Build and commit payload with transaction timeout
-		err = WithTimeout(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsTx)*time.Second,
+		err = WithTimeout(ctx, time.Duration(walletConfig.TimeoutRPCSecondsTx)*time.Second,
 			func(ctx context.Context) error {
 				return suite.BuildCommitWorkerPayload(ctx, worker, latestOpenWorkerNonce, timeoutHeight)
 			})
@@ -181,19 +229,28 @@ func (suite *UseCaseSuite) processWorkerPayload(ctx context.Context, worker lib.
 func (suite *UseCaseSuite) processReputerPayload(ctx context.Context, reputer lib.ReputerConfig, latestNonceHeightActedUpon int64, timeoutHeight uint64) (int64, error) {
 	log := log.With().Uint64("topicId", reputer.TopicId).Str("actorType", "reputer").Logger()
 	log.Info().Msg("Processing reputer payload")
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return 0, errorsmod.Wrapf(err, "Error getting wallet config")
+	}
+	wallet, err := suite.ConnectionManager.GetWallet()
+	if err != nil {
+		return 0, errorsmod.Wrapf(err, "Error getting wallet")
+	}
 	// Get nonce with RPC timeout
 
-	nonce, err := RunWithNodeRetry(
+	nonce, err := lib.RunWithNodeRetry(
 		ctx,
-		suite.RPCManager,
+		suite.ConnectionManager,
 		func(node *lib.NodeConfig) (*emissionstypes.Nonce, error) {
 			return WithTimeoutResult(ctx,
-				time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+				time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 				func(ctx context.Context) (*emissionstypes.Nonce, error) {
 					return node.GetOldestReputerNonceByTopicId(ctx, reputer.TopicId)
 				})
 		},
 		"get oldest reputer nonce",
+		lib.GRPC_MODE,
 	)
 	if err != nil {
 		log.Warn().Err(err).Msg("Error getting latest open reputer nonce on topic - node availability issue?")
@@ -202,17 +259,18 @@ func (suite *UseCaseSuite) processReputerPayload(ctx context.Context, reputer li
 
 	if nonce.BlockHeight > latestNonceHeightActedUpon {
 		// Check if reputer can submit
-		isWhitelisted, err := RunWithNodeRetry(
+		isWhitelisted, err := lib.RunWithNodeRetry(
 			ctx,
-			suite.RPCManager,
+			suite.ConnectionManager,
 			func(node *lib.NodeConfig) (bool, error) {
 				return WithTimeoutResult(ctx,
-					time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+					time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 					func(ctx context.Context) (bool, error) {
-						return node.CanSubmitReputer(ctx, reputer.TopicId, node.Wallet.Address)
+						return node.CanSubmitReputer(ctx, reputer.TopicId, wallet.Address)
 					})
 			},
 			"check reputer whitelist",
+			lib.GRPC_MODE,
 		)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to check if reputer is whitelisted")
@@ -224,7 +282,7 @@ func (suite *UseCaseSuite) processReputerPayload(ctx context.Context, reputer li
 		}
 
 		// Build and commit payload with transaction timeout
-		err = WithTimeout(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsTx)*time.Second,
+		err = WithTimeout(ctx, time.Duration(walletConfig.TimeoutRPCSecondsTx)*time.Second,
 			func(ctx context.Context) error {
 				return suite.BuildCommitReputerPayload(ctx, reputer, nonce.BlockHeight, timeoutHeight)
 			})
@@ -273,17 +331,28 @@ func (suite *UseCaseSuite) runWorkerProcess(ctx context.Context, worker lib.Work
 	log := log.With().Uint64("topicId", worker.TopicId).Str("actorType", "worker").Logger()
 	log.Info().Msg("Running worker process for topic")
 
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get wallet config")
+		return
+	}
+	wallet, err := suite.ConnectionManager.GetWallet()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get wallet")
+		return
+	}
 	// Handle registration
-	registered, err := RunWithNodeRetry(
+	registered, err := lib.RunWithNodeRetry(
 		ctx,
-		suite.RPCManager,
+		suite.ConnectionManager,
 		func(node *lib.NodeConfig) (bool, error) {
-			return WithTimeoutResult(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsRegistration)*time.Second,
+			return WithTimeoutResult(ctx, time.Duration(walletConfig.TimeoutRPCSecondsRegistration)*time.Second,
 				func(ctx context.Context) (bool, error) {
-					return node.RegisterWorkerIdempotently(ctx, worker)
+					return suite.RegisterWorkerIdempotently(ctx, worker)
 				})
 		},
 		"RegisterWorkerIdempotently",
+		lib.RPC_MODE,
 	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to register for topic, exiting")
@@ -304,13 +373,14 @@ func (suite *UseCaseSuite) runWorkerProcess(ctx context.Context, worker lib.Work
 	}
 
 	getNonce := func(ctx context.Context, topicId emissionstypes.TopicId) (*emissionstypes.Nonce, error) {
-		return RunWithNodeRetry(
+		return lib.RunWithNodeRetry(
 			ctx,
-			suite.RPCManager,
+			suite.ConnectionManager,
 			func(node *lib.NodeConfig) (*emissionstypes.Nonce, error) {
 				return node.GetLatestOpenWorkerNonceByTopicId(ctx, topicId)
 			},
 			"get latest open worker nonce",
+			lib.GRPC_MODE,
 		)
 	}
 	params := ActorProcessParams[lib.WorkerConfig]{
@@ -323,16 +393,17 @@ func (suite *UseCaseSuite) runWorkerProcess(ctx context.Context, worker lib.Work
 	}
 
 	// Check if worker is isWhitelisted
-	isWhitelisted, err := RunWithNodeRetry(
+	isWhitelisted, err := lib.RunWithNodeRetry(
 		ctx,
-		suite.RPCManager,
+		suite.ConnectionManager,
 		func(node *lib.NodeConfig) (bool, error) {
-			return WithTimeoutResult(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+			return WithTimeoutResult(ctx, time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 				func(ctx context.Context) (bool, error) {
-					return node.CanSubmitWorker(ctx, worker.TopicId, node.Wallet.Address)
+					return node.CanSubmitWorker(ctx, worker.TopicId, wallet.Address)
 				})
 		},
 		"check worker whitelist",
+		lib.GRPC_MODE,
 	)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check if worker is whitelisted")
@@ -352,26 +423,36 @@ func (suite *UseCaseSuite) runReputerProcess(ctx context.Context, reputer lib.Re
 	// Create a logger with the topicId
 	log := log.With().Uint64("topicId", reputer.TopicId).Str("actorType", "reputer").Logger()
 	log.Debug().Msg("Running reputer process for topic")
-
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get wallet config")
+		return
+	}
+	wallet, err := suite.ConnectionManager.GetWallet()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get wallet")
+		return
+	}
 	// Handle registration and staking
-	registeredAndStaked, err := RunWithNodeRetry(
+	registeredAndStaked, err := lib.RunWithNodeRetry(
 		ctx,
-		suite.RPCManager,
+		suite.ConnectionManager,
 		func(node *lib.NodeConfig) (bool, error) {
 			return WithTimeoutResult(ctx,
-				time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsRegistration)*time.Second,
+				time.Duration(walletConfig.TimeoutRPCSecondsRegistration)*time.Second,
 				func(ctx context.Context) (bool, error) {
-					return node.RegisterAndStakeReputerIdempotently(ctx, reputer)
+					return suite.RegisterAndStakeReputerIdempotently(ctx, reputer)
 				})
 		},
 		"RegisterAndStakeReputerIdempotently",
+		lib.RPC_MODE,
 	)
 	if err != nil {
-		log.Fatal().Msg("Failed to register or sufficiently stake for topic")
+		log.Error().Err(err).Msg("Error: Failed to register or sufficiently stake for topic")
 		return
 	}
 	if !registeredAndStaked {
-		log.Error().Msg("Failed to register or sufficiently stake for topic")
+		log.Error().Msg("Could not register or sufficiently stake for topic")
 		return
 	}
 	log.Debug().Msg("Reputer registered and staked")
@@ -384,13 +465,14 @@ func (suite *UseCaseSuite) runReputerProcess(ctx context.Context, reputer lib.Re
 	}
 
 	getNonce := func(ctx context.Context, topicId emissionstypes.TopicId) (*emissionstypes.Nonce, error) {
-		return RunWithNodeRetry(
+		return lib.RunWithNodeRetry(
 			ctx,
-			suite.RPCManager,
+			suite.ConnectionManager,
 			func(node *lib.NodeConfig) (*emissionstypes.Nonce, error) {
 				return node.GetOldestReputerNonceByTopicId(ctx, topicId)
 			},
 			"get oldest reputer nonce",
+			lib.GRPC_MODE,
 		)
 	}
 	params := ActorProcessParams[lib.ReputerConfig]{
@@ -403,17 +485,18 @@ func (suite *UseCaseSuite) runReputerProcess(ctx context.Context, reputer lib.Re
 	}
 
 	// Check if reputer is isWhitelisted
-	isWhitelisted, err := RunWithNodeRetry(
+	isWhitelisted, err := lib.RunWithNodeRetry(
 		ctx,
-		suite.RPCManager,
+		suite.ConnectionManager,
 		func(node *lib.NodeConfig) (bool, error) {
 			return WithTimeoutResult(ctx,
-				time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+				time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 				func(ctx context.Context) (bool, error) {
-					return node.CanSubmitReputer(ctx, reputer.TopicId, node.Wallet.Address)
+					return node.CanSubmitReputer(ctx, reputer.TopicId, wallet.Address)
 				})
 		},
 		"check reputer whitelist",
+		lib.GRPC_MODE,
 	)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to check if reputer is whitelisted")
@@ -434,8 +517,13 @@ func (suite *UseCaseSuite) runReputerProcess(ctx context.Context, reputer lib.Re
 func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite, params ActorProcessParams[T]) {
 	// Create a logger with the topicId and actorType
 	log := log.With().Uint64("topicId", params.Config.GetTopicId()).Str("actorType", params.ActorType).Logger()
-
 	log.Debug().Msg("Running actor process for topic")
+
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get wallet config")
+		return
+	}
 
 	topicInfo, err := queryTopicInfo(ctx, suite, params.Config)
 	if err != nil {
@@ -451,9 +539,13 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 	for {
 		log.Trace().Msg("Start iteration, querying latest block")
 		// Query the latest block
-		status, err := WithTimeoutResult(ctx, time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
-			func(ctx context.Context) (*ctypes.ResultStatus, error) {
-				return suite.RPCManager.GetCurrentNode().Chain.Client.Status(ctx)
+		currentBlockHeight, err = WithTimeoutResult(ctx, time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
+			func(ctx context.Context) (lib.BlockHeight, error) {
+				node, err := suite.ConnectionManager.GetCurrentQueryNode()
+				if err != nil {
+					return 0, fmt.Errorf("failed to get current query node: %w", err)
+				}
+				return node.GetBlockHeight(ctx, walletConfig)
 			})
 
 		if err != nil {
@@ -463,7 +555,6 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 			}
 			continue
 		}
-		currentBlockHeight = status.SyncInfo.LatestBlockHeight
 
 		topicInfo, err := queryTopicInfo(ctx, suite, params.Config)
 		if err != nil {
@@ -489,7 +580,7 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 			// Wait for an epochLength with a correction factor, it will self-adjust from there
 			waitingTimeInSeconds, err := calculateTimeDistanceInSeconds(
 				epochLength,
-				suite.RPCManager.GetCurrentNode().Wallet.BlockDurationEstimated,
+				walletConfig.BlockDurationEstimated,
 				NEW_TOPIC_CORRECTION_FACTOR,
 			)
 			if err != nil {
@@ -533,8 +624,8 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 
 			waitingTimeInSeconds, err = calculateTimeDistanceInSeconds(
 				distanceUntilNextEpoch,
-				suite.RPCManager.GetCurrentNode().Wallet.BlockDurationEstimated,
-				suite.RPCManager.GetCurrentNode().Wallet.WindowCorrectionFactor,
+				walletConfig.BlockDurationEstimated,
+				walletConfig.WindowCorrectionFactor,
 			)
 			if err != nil {
 				log.Error().Err(err).Msg("Error calculating time distance to next epoch after sending tx")
@@ -550,7 +641,7 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 			// Inconsistent topic data, wait until the next epoch
 			waitingTimeInSeconds, err = calculateTimeDistanceInSeconds(
 				epochLength,
-				suite.RPCManager.GetCurrentNode().Wallet.BlockDurationEstimated,
+				walletConfig.BlockDurationEstimated,
 				NEARNESS_CORRECTION_FACTOR,
 			)
 			if err != nil {
@@ -571,7 +662,7 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 				closeBlockDistance := distanceUntilNextEpoch + offset
 				waitingTimeInSeconds, err = calculateTimeDistanceInSeconds(
 					closeBlockDistance,
-					suite.RPCManager.GetCurrentNode().Wallet.BlockDurationEstimated,
+					walletConfig.BlockDurationEstimated,
 					NEARNESS_CORRECTION_FACTOR,
 				)
 				if err != nil {
@@ -590,8 +681,8 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 				// Far distance, bigger waits until the submission window opens
 				waitingTimeInSeconds, err = calculateTimeDistanceInSeconds(
 					distanceUntilNextEpoch,
-					suite.RPCManager.GetCurrentNode().Wallet.BlockDurationEstimated,
-					suite.RPCManager.GetCurrentNode().Wallet.WindowCorrectionFactor,
+					walletConfig.BlockDurationEstimated,
+					walletConfig.WindowCorrectionFactor,
 				)
 				if err != nil {
 					log.Error().Err(err).Msg("Error calculating far distance to epochLength")
@@ -618,10 +709,18 @@ func queryTopicInfo[T lib.TopicActor](
 	suite *UseCaseSuite,
 	config T,
 ) (*emissionstypes.Topic, error) {
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return nil, errorsmod.Wrapf(err, "Error getting wallet config")
+	}
 	topicInfo, err := WithTimeoutResult(ctx,
-		time.Duration(suite.RPCManager.GetCurrentNode().Wallet.TimeoutRPCSecondsQuery)*time.Second,
+		time.Duration(walletConfig.TimeoutRPCSecondsQuery)*time.Second,
 		func(ctx context.Context) (*emissionstypes.Topic, error) {
-			return suite.RPCManager.GetCurrentNode().GetTopicInfo(ctx, config.GetTopicId())
+			node, err := suite.ConnectionManager.GetCurrentQueryNode()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get current query node: %w", err)
+			}
+			return node.GetTopicInfo(ctx, config.GetTopicId())
 		})
 	if err != nil {
 		return nil, errorsmod.Wrapf(err, "failed to get topic info")

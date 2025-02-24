@@ -3,16 +3,21 @@ package lib
 import (
 	"context"
 
+	errorsmod "cosmossdk.io/errors"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 )
 
 // Gets the latest open worker nonce for a given topic, with retries
 func (node *NodeConfig) GetLatestOpenWorkerNonceByTopicId(ctx context.Context, topicId emissionstypes.TopicId) (*emissionstypes.Nonce, error) {
+	walletConfig, err := node.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return &emissionstypes.Nonce{}, errorsmod.Wrapf(err, "Error getting wallet config")
+	}
 	resp, err := QueryDataWithRetry(
 		ctx,
-		node.Wallet.MaxRetries,
-		node.Wallet.RetryDelay,
+		walletConfig.MaxRetries,
+		walletConfig.RetryDelay,
 		func(ctx context.Context, req query.PageRequest) (*emissionstypes.GetUnfulfilledWorkerNoncesResponse, error) {
 			return node.Chain.EmissionsQueryClient.GetUnfulfilledWorkerNonces(ctx, &emissionstypes.GetUnfulfilledWorkerNoncesRequest{
 				TopicId: topicId,
@@ -35,10 +40,14 @@ func (node *NodeConfig) GetLatestOpenWorkerNonceByTopicId(ctx context.Context, t
 
 // Gets the oldest open reputer nonce for a given topic, with retries
 func (node *NodeConfig) GetOldestReputerNonceByTopicId(ctx context.Context, topicId emissionstypes.TopicId) (*emissionstypes.Nonce, error) {
+	walletConfig, err := node.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return &emissionstypes.Nonce{}, errorsmod.Wrapf(err, "Error getting wallet config")
+	}
 	resp, err := QueryDataWithRetry(
 		ctx,
-		node.Wallet.MaxRetries,
-		node.Wallet.RetryDelay,
+		walletConfig.MaxRetries,
+		walletConfig.RetryDelay,
 		func(ctx context.Context, req query.PageRequest) (*emissionstypes.GetUnfulfilledReputerNoncesResponse, error) {
 			return node.Chain.EmissionsQueryClient.GetUnfulfilledReputerNonces(ctx, &emissionstypes.GetUnfulfilledReputerNoncesRequest{
 				TopicId: topicId,

@@ -1,25 +1,23 @@
 package usecase
 
 import (
-	lib "allora_offchain_node/lib"
+	"allora_offchain_node/lib"
+	"allora_offchain_node/metrics"
+	"context"
 )
 
 type UseCaseSuite struct {
-	UserConfig lib.UserConfig
-	RPCManager RPCManagerInterface
-	Metrics    lib.Metrics
+	UserConfig        lib.UserConfig
+	ConnectionManager lib.ConnectionManagerInterface
+	Metrics           *metrics.Metrics
 }
 
 // Static method to create a new UseCaseSuite
-func NewUseCaseSuite(userConfig lib.UserConfig) (*UseCaseSuite, error) {
+func NewUseCaseSuite(ctx context.Context, userConfig lib.UserConfig, connectionManager lib.ConnectionManagerInterface) (*UseCaseSuite, error) {
 	err := userConfig.ValidateConfigAdapters()
 	if err != nil {
 		return nil, err
 	}
 
-	rpcManager, err := NewRPCManager(userConfig)
-	if err != nil {
-		return nil, err
-	}
-	return &UseCaseSuite{UserConfig: userConfig, RPCManager: rpcManager}, nil // nolint: exhaustruct
+	return &UseCaseSuite{UserConfig: userConfig, ConnectionManager: connectionManager}, nil // nolint: exhaustruct
 }

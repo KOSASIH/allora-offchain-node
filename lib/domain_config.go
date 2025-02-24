@@ -1,14 +1,17 @@
 package lib
 
 import (
+	"allora_offchain_node/lib/rpcclient"
 	"errors"
 	"fmt"
 
 	emissions "github.com/allora-network/allora-chain/x/emissions/types"
+	cmtservice "github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
+	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
+	auth "github.com/cosmos/cosmos-sdk/x/auth/types"
 	bank "github.com/cosmos/cosmos-sdk/x/bank/types"
-	"github.com/ignite/cli/v28/ignite/pkg/cosmosaccount"
-	"github.com/ignite/cli/v28/ignite/pkg/cosmosclient"
 	feemarkettypes "github.com/skip-mev/feemarket/x/feemarket/types"
+	"google.golang.org/grpc"
 )
 
 const AutoGasPrices = "auto"
@@ -24,28 +27,43 @@ const (
 
 // Default values
 const (
-	DefaultTimeoutRPCSecondsQuery        int64 = 60
-	DefaultTimeoutRPCSecondsTx           int64 = 300
-	DefaultTimeoutRPCSecondsRegistration int64 = 300
-	DefaultTimeoutHTTPConnection         int64 = 10
-	DefaultGasPriceUpdateInterval        int64 = 60
+	DefaultTimeoutRPCSecondsQuery        int64   = 60
+	DefaultTimeoutRPCSecondsTx           int64   = 300
+	DefaultTimeoutRPCSecondsRegistration int64   = 300
+	DefaultTimeoutHTTPConnection         int64   = 10
+	DefaultGasPriceUpdateInterval        int64   = 60
+	DefaultLaunchRoutineDelay            int64   = 5
+	DefaultRetryDelay                    int64   = 3
+	DefaultAccountSequenceRetryDelay     int64   = 5
+	DefaultBaseGas                       uint64  = 200000
+	DefaultGasPerByte                    uint64  = 1
+	DefaultKeyringBackend                string  = "test"
+	DefaultGasAdjustment                 float64 = 1.2
+	DefaultSimulateGasFromStart          bool    = false
 )
 
 // Properties manually provided by the user as part of UserConfig
 type WalletConfig struct {
-	Address                       string // will be overwritten by the keystore. This is the 1 value that is auto-generated in this struct
-	AddressKeyName                string // load a address by key from the keystore
-	AddressRestoreMnemonic        string
+	// Provided by the user
+	AddressKeyName                string                  // load a address by key from the keystore
+	AddressRestoreMnemonic        string                  // load a address by mnemonic from the keystore
 	AlloraHomeDir                 string                  // home directory for the allora keystore
-	Gas                           string                  // gas to use for the allora client
-	GasAdjustment                 float64                 // gas adjustment to use for the allora client
+	ChainId                       string                  // chain id
+	KeyringBackend                string                  // keyring backend to use ("test", "os", "file", ...)
+	KeyringPassphrase             string                  // passphrase for the keyring (if needed)
 	GasPrices                     string                  // gas prices to use for the allora client - "auto" for auto-calculated fees
 	GasPriceUpdateInterval        int64                   // number of seconds to wait between updates to the gas price
+	GasAdjustment                 float64                 // adjustment factor for the gas used
+	SimulateGasFromStart          bool                    // true: simulate gas on first try, false: simulate gas on retry only
 	MaxFees                       FlexibleCosmosIntAmount // max fees to pay for a single transaction (as string or number)
+	BaseGas                       uint64                  // base gas to use for the allora client
+	GasPerByte                    uint64                  // gas per byte to use for the allora client
 	NodeRPCs                      []string                // rpc nodes for allora chain
+	NodeGRPCs                     []string                // grpc nodes for allora chain
 	MaxRetries                    int64                   // retry to get data from chain up to this many times per query or tx
 	RetryDelay                    int64                   // number of seconds to wait between retries (general case)
 	AccountSequenceRetryDelay     int64                   // number of seconds to wait between retries in case of account sequence error
+	LaunchRoutineDelay            int64                   // number of seconds to wait between starting a routine and the next one to avoid 429 errors
 	SubmitTx                      bool                    // useful for dev/testing. set to false to run in dry-run processes without committing to the chain
 	BlockDurationEstimated        float64                 // estimated average block duration in seconds
 	WindowCorrectionFactor        float64                 // correction factor for the time estimation, suggested range 0.7-0.9.
@@ -53,18 +71,19 @@ type WalletConfig struct {
 	TimeoutRPCSecondsTx           int64                   // timeout for rpc data send in seconds, including retries
 	TimeoutRPCSecondsRegistration int64                   // timeout for rpc registration in seconds, including retries
 	TimeoutHTTPConnection         int64                   // timeout for http connection in seconds
+
 }
 
-// Properties auto-generated based on what the user has provided in WalletConfig fields of UserConfig
+// Communication with the chain
 type ChainConfig struct {
-	Address              string // will be auto-generated based on the keystore
-	Account              cosmosaccount.Account
-	Client               *cosmosclient.Client
+	RPCClient            *rpcclient.AlloraRPCClient // A custom wrapper around the cometrpc.HTTP client
+	GRPCClient           *grpc.ClientConn           // Basic type to be used to init module-based clients
 	EmissionsQueryClient emissions.QueryServiceClient
 	BankQueryClient      bank.QueryClient
+	AuthQueryClient      auth.QueryClient
 	FeeMarketQueryClient feemarkettypes.QueryClient
-	DefaultBondDenom     string
-	AddressPrefix        string // prefix for the allora addresses
+	CometQueryClient     cmtservice.ServiceClient
+	TxServiceClient      txtypes.ServiceClient
 }
 
 type TopicActor interface {
@@ -117,12 +136,11 @@ type UserConfig struct {
 	Reputer []ReputerConfig
 }
 
+// NodeConfig is the configuration for a node
 type NodeConfig struct {
-	RPC     string
-	Chain   ChainConfig
-	Wallet  WalletConfig
-	Worker  []WorkerConfig
-	Reputer []ReputerConfig
+	ServerAddress     string             // Server endpoint address URI
+	Chain             ChainConfig        // Configuration for the chain
+	ConnectionManager *ConnectionManager // Link to the ConnectionManager that created this node
 }
 
 type WorkerResponse struct {
@@ -161,8 +179,26 @@ func (c *UserConfig) CheckAndSetDefaults() {
 	if c.Wallet.GasPriceUpdateInterval == 0 {
 		c.Wallet.GasPriceUpdateInterval = DefaultGasPriceUpdateInterval
 	}
+	if c.Wallet.LaunchRoutineDelay == 0 {
+		c.Wallet.LaunchRoutineDelay = DefaultLaunchRoutineDelay
+	}
+	if c.Wallet.RetryDelay == 0 {
+		c.Wallet.RetryDelay = DefaultRetryDelay
+	}
 	if c.Wallet.TimeoutHTTPConnection == 0 {
 		c.Wallet.TimeoutHTTPConnection = DefaultTimeoutHTTPConnection
+	}
+	if c.Wallet.BaseGas == 0 {
+		c.Wallet.BaseGas = DefaultBaseGas
+	}
+	if c.Wallet.GasPerByte == 0 {
+		c.Wallet.GasPerByte = DefaultGasPerByte
+	}
+	if c.Wallet.KeyringBackend == "" {
+		c.Wallet.KeyringBackend = DefaultKeyringBackend
+	}
+	if c.Wallet.GasAdjustment == 0 {
+		c.Wallet.GasAdjustment = DefaultGasAdjustment
 	}
 }
 
@@ -218,6 +254,12 @@ func (c *UserConfig) ValidateWalletConfig() error {
 	}
 	if c.Wallet.TimeoutRPCSecondsTx < 0 {
 		return fmt.Errorf("invalid timeout rpc seconds tx: %d", c.Wallet.TimeoutRPCSecondsTx)
+	}
+	if c.Wallet.ChainId == "" {
+		return fmt.Errorf("chain id is empty")
+	}
+	if c.Wallet.GasAdjustment <= 0 {
+		return fmt.Errorf("gas adjustment must be greater than 0: %f", c.Wallet.GasAdjustment)
 	}
 	return nil
 }

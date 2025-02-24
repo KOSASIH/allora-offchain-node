@@ -1,7 +1,9 @@
 package usecase
 
 import (
-	"allora_offchain_node/lib"
+	lib "allora_offchain_node/lib"
+	auth "allora_offchain_node/lib/auth"
+	metrics "allora_offchain_node/metrics"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +13,6 @@ import (
 	errorsmod "cosmossdk.io/errors"
 	alloraMath "github.com/allora-network/allora-chain/math"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
-	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	"github.com/rs/zerolog/log"
 )
 
@@ -21,14 +22,23 @@ import (
 func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, reputer lib.ReputerConfig, nonce lib.BlockHeight, timeoutHeight uint64) error {
 	log := log.With().Uint64("topicId", reputer.TopicId).Str("actorType", "reputer").Logger()
 	log.Info().Msg("Building reputer payload")
+	wallet, err := suite.ConnectionManager.GetWallet()
+	if err != nil {
+		return errorsmod.Wrapf(err, "Error getting wallet")
+	}
+	walletConfig, err := suite.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return errorsmod.Wrapf(err, "Error getting wallet config")
+	}
 
-	valueBundle, err := RunWithNodeRetry(
+	valueBundle, err := lib.RunWithNodeRetry(
 		ctx,
-		suite.RPCManager,
+		suite.ConnectionManager,
 		func(node *lib.NodeConfig) (*emissionstypes.ValueBundle, error) {
 			return node.GetReputerValuesAtBlock(ctx, reputer.TopicId, nonce)
 		},
 		"get reputer values",
+		lib.GRPC_MODE,
 	)
 	if err != nil {
 		return errorsmod.Wrapf(err, "error getting reputer values, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
@@ -36,19 +46,19 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 	valueBundle.ReputerRequestNonce = &emissionstypes.ReputerRequestNonce{
 		ReputerNonce: &emissionstypes.Nonce{BlockHeight: nonce},
 	}
-	valueBundle.Reputer = suite.RPCManager.GetCurrentNode().Wallet.Address
+	valueBundle.Reputer = wallet.Address
 
 	sourceTruth, err := reputer.GroundTruthEntrypoint.GroundTruth(reputer, nonce)
 	if err != nil {
 		return errorsmod.Wrapf(err, "error getting source truth from reputer, topicId: %d, blockHeight: %d", reputer.TopicId, nonce)
 	}
-	suite.Metrics.IncrementMetricsCounter(lib.TruthRequestCount, suite.RPCManager.GetCurrentNode().Chain.Address, reputer.TopicId)
+	suite.Metrics.IncrementMetricsCounter(metrics.TruthRequestCount, wallet.Address, reputer.TopicId)
 
 	lossBundle, err := suite.ComputeLossBundle(sourceTruth, valueBundle, reputer)
 	if err != nil {
 		return errorsmod.Wrapf(err, "error computing loss bundle, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
 	}
-	suite.Metrics.IncrementMetricsCounter(lib.ReputerDataBuildCount, suite.RPCManager.GetCurrentNode().Chain.Address, reputer.TopicId)
+	suite.Metrics.IncrementMetricsCounter(metrics.ReputerDataBuildCount, wallet.Address, reputer.TopicId)
 
 	signedValueBundle, err := suite.SignReputerValueBundle(&lossBundle)
 	if err != nil {
@@ -60,7 +70,7 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 	}
 
 	req := &emissionstypes.InsertReputerPayloadRequest{
-		Sender:             suite.RPCManager.GetCurrentNode().Wallet.Address,
+		Sender:             wallet.Address,
 		ReputerValueBundle: signedValueBundle,
 	}
 	reqJSON, err := json.Marshal(req)
@@ -70,12 +80,12 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 		log.Debug().Msgf("Sending InsertReputerPayload to chain %s", string(reqJSON))
 	}
 
-	if suite.RPCManager.GetCurrentNode().Wallet.SubmitTx {
-		_, err = suite.RPCManager.SendDataWithNodeRetry(ctx, req, timeoutHeight, "Send Reputer Data to chain")
+	if walletConfig.SubmitTx {
+		_, err = suite.ConnectionManager.SendDataWithNodeRetry(ctx, req, timeoutHeight, "Send Reputer Data to chain")
 		if err != nil {
 			return errorsmod.Wrapf(err, "error sending Reputer Data to chain, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
 		}
-		suite.Metrics.IncrementMetricsCounter(lib.ReputerChainSubmissionCount, suite.RPCManager.GetCurrentNode().Chain.Address, reputer.TopicId)
+		suite.Metrics.IncrementMetricsCounter(metrics.ReputerChainSubmissionCount, wallet.Address, reputer.TopicId)
 	} else {
 		log.Info().Msg("SubmitTx=false; Skipping sending Reputer Data to chain")
 	}
@@ -212,18 +222,15 @@ func (suite *UseCaseSuite) ComputeLossBundle(sourceTruth string, vb *emissionsty
 }
 
 func (suite *UseCaseSuite) SignReputerValueBundle(valueBundle *emissionstypes.ValueBundle) (*emissionstypes.ReputerValueBundle, error) {
-	// Marshall and sign the bundle
-	protoBytesIn := make([]byte, 0) // Create a byte slice with initial length 0 and capacity greater than 0
-	protoBytesIn, err := valueBundle.XXX_Marshal(protoBytesIn, true)
+	wallet, err := suite.ConnectionManager.GetWallet()
 	if err != nil {
-		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error marshalling valueBundle")
+		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
 	}
-	sig, pk, err := suite.RPCManager.GetCurrentNode().Chain.Client.Context().Keyring.
-		Sign(suite.RPCManager.GetCurrentNode().Chain.Account.Name, protoBytesIn, signing.SignMode_SIGN_MODE_DIRECT)
+	sig, pk, err := auth.MarshalAndSignByPrivKey(valueBundle, wallet.GetPrivKey(), wallet.AddressSDK)
 	if err != nil {
-		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error signing valueBundle")
+		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error signing the InferenceForecastsBundle message") // nolint: exhaustruct
 	}
-	pkStr := hex.EncodeToString(pk.Bytes())
+	pkStr := hex.EncodeToString(pk)
 	reputerValueBundle := &emissionstypes.ReputerValueBundle{
 		ValueBundle: valueBundle,
 		Signature:   sig,

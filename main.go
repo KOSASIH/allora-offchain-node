@@ -2,6 +2,7 @@ package main
 
 import (
 	"allora_offchain_node/lib"
+	"allora_offchain_node/metrics"
 	usecase "allora_offchain_node/usecase"
 	"context"
 	"encoding/json"
@@ -9,7 +10,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
 )
@@ -61,17 +64,36 @@ func ConvertEntrypointsToInstances(userConfig lib.UserConfig) error {
 }
 
 func main() {
+	// Context tree:
+	// root context (ctx)
+	// ├── NewUseCaseSuite initialization
+	// └── signal context (sigCtx)
+	// 	   └── Spawn process
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCtx, sigCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer sigCancel()
+
+	// Initialize logger
 	initLogger()
 	if dotErr := godotenv.Load(); dotErr != nil {
 		log.Info().Msg("Unable to load .env file")
 	}
 
+	// Set and lock sdk config
+	config := sdktypes.GetConfig()
+	config.SetBech32PrefixForAccount(lib.ADDRESS_PREFIX, lib.ADDRESS_PREFIX)
+	config.Seal()
+
 	log.Info().Msg("Starting allora offchain node...")
 
-	metrics := lib.NewMetrics(lib.CounterData)
-	metrics.RegisterMetricsCounters()
-	metrics.StartMetricsServer(":2112")
+	// Metrics
+	metrics.InitMetrics(metrics.CounterData)
+	metricsServer := metrics.GetMetrics()
+	metricsServer.StartMetricsServer(":2112")
 
+	// Load config and do modifications if needed
 	finalUserConfig := lib.UserConfig{} // nolint: exhaustruct
 	alloraJsonConfig := os.Getenv(lib.ALLORA_OFFCHAIN_NODE_CONFIG_JSON)
 	if alloraJsonConfig != "" {
@@ -110,28 +132,51 @@ func main() {
 		return
 	}
 
-	spawner, err := usecase.NewUseCaseSuite(finalUserConfig)
+	// Check and set defaults for the user config if any values are not set
+	finalUserConfig.CheckAndSetDefaults()
+
+	// Creates the ConnectionManagerand initialises the NodeConfigs
+	connectionManager, err := lib.NewConnectionManager(sigCtx, finalUserConfig)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to initialize ConnectionManager, exiting")
+		return
+	}
+	// Close the ConnectionManager when the program exits
+	defer connectionManager.Close()
+	wallet, err := connectionManager.GetWallet()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get wallet, exiting")
+		return
+	}
+
+	spawner, err := usecase.NewUseCaseSuite(sigCtx, finalUserConfig, connectionManager)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize use case, exiting")
 		return
 	}
 
-	spawner.Metrics = *metrics
+	spawner.Metrics = metricsServer // cache the metrics object for ease of access on usecase suite
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCtx, sigCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer sigCancel()
-
+	log.Info().Msg("Starting spawning processes...")
 	go func() {
-		spawner.Spawn(sigCtx)
-		cancel()
+		err := spawner.Spawn(sigCtx)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to spawn processes, exiting")
+			cancel()
+		}
 	}()
 
 	<-sigCtx.Done()
 
+	metricsServer.IncrementMetricsCounter(metrics.ApplicationFinishedCount, wallet.Address, 0)
+	// shutdown metrics server
+	log.Info().Msg("Shutting down metrics server")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Error shutting down metrics server")
+	}
+
 	log.Info().Msg("Stopping...")
 
-	<-ctx.Done()
 }

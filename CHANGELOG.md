@@ -56,6 +56,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 
+## v0.9.0
+
+### Added
+
+* [#108](https://github.com/allora-network/allora-offchain-node/pull/108) Removed ignite, GRPC/RPC, data model restructure, refactor and cleanup
+* [#98](https://github.com/allora-network/allora-offchain-node/pull/98) Multiple RPC nodes, with rpc-looping management
+
+### Changed
+
+### Fixed
+
+### Removed
+
+### Fixed
+
+### Security
+
+
 ## v0.8.1
 
 ### Added
@@ -64,7 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * [#104](https://github.com/allora-network/allora-offchain-node/pull/104) Customize rpc client configurations
 * [#105](https://github.com/allora-network/allora-offchain-node/pull/105) Make HTTP timeout configurable
 * [#106](https://github.com/allora-network/allora-offchain-node/pull/106) Improve log context by adding topic id and actor type to logger
-* [#98](https://github.com/allora-network/allora-offchain-node/pull/98) RPC nodes as an array, with rpc-looping management
 
 ### Changed
 

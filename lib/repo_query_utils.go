@@ -20,7 +20,11 @@ func QueryDataWithRetry[T any](
 	node *NodeConfig,
 ) (T, error) {
 	var result T
-	var err error
+
+	walletConfig, err := node.ConnectionManager.GetWalletConfig()
+	if err != nil {
+		return result, errorsmod.Wrapf(err, "Error getting wallet config")
+	}
 
 	for retryCount := int64(0); retryCount <= maxRetries; retryCount++ {
 		log.Trace().Msgf("QueryDataWithRetry iteration started (%d/%d): %s", retryCount, maxRetries, infoMsg)
@@ -32,16 +36,16 @@ func QueryDataWithRetry[T any](
 		// Log the error for each retry.
 		log.Error().Err(err).Msgf("Query failed, retrying... (Retry %d/%d): %s", retryCount, maxRetries, infoMsg)
 
-		errorResponse, err := ProcessErrorTx(ctx, err, infoMsg, retryCount, node.Wallet.MaxRetries, node)
+		errorResponse, err := ProcessErrorTx(ctx, err, infoMsg, retryCount, walletConfig.MaxRetries, node)
 		switch errorResponse {
 		case ErrorProcessingOk:
 			return result, nil
 		case ErrorProcessingError:
 			// if error has not been handled, sleep and retry with regular delay
 			if err != nil {
-				log.Error().Err(err).Str("rpc", node.RPC).Str("msg", infoMsg).Msgf("Failed, retrying... (Retry %d/%d)", retryCount, node.Wallet.MaxRetries)
+				log.Error().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msgf("Failed, retrying... (Retry %d/%d)", retryCount, walletConfig.MaxRetries)
 				// Wait for the uniform delay before retrying
-				if DoneOrWait(ctx, node.Wallet.RetryDelay) {
+				if DoneOrWait(ctx, walletConfig.RetryDelay) {
 					return result, ctx.Err()
 				}
 				continue
@@ -51,6 +55,9 @@ func QueryDataWithRetry[T any](
 			continue
 		case ErrorProcessingFees:
 			log.Debug().Msg("Query failed due to fees limit")
+			return result, err
+		case ErrorProcessingGas:
+			log.Debug().Msg("Query failed due to gas limit")
 			return result, err
 		case ErrorProcessingFailure:
 			return result, errorsmod.Wrapf(err, "query failed and not retried")

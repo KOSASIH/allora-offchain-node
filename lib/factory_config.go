@@ -1,47 +1,33 @@
 package lib
 
 import (
+	grpcclient "allora_offchain_node/lib/grpcclient"
+	rpcclient "allora_offchain_node/lib/rpcclient"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
-	errorsmod "cosmossdk.io/errors"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
-	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	"github.com/ignite/cli/v28/ignite/pkg/cosmosaccount"
-	"github.com/ignite/cli/v28/ignite/pkg/cosmosclient"
+
+	cmtservice "github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
 	feemarkettypes "github.com/skip-mev/feemarket/x/feemarket/types"
 
-	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
+	errorsmod "cosmossdk.io/errors"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+
+	cometrpc "github.com/cometbft/cometbft/rpc/client/http"
 	jsonrpc "github.com/cometbft/cometbft/rpc/jsonrpc/client"
+	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 )
 
-func getAlloraClient(config *UserConfig, rpc string) (*cosmosclient.Client, error) {
-	// create a allora client instance
-	ctx := context.Background()
-	userHomeDir, _ := os.UserHomeDir()
-	alloraClientHome := filepath.Join(userHomeDir, ".allorad")
-	if config.Wallet.AlloraHomeDir != "" {
-		alloraClientHome = config.Wallet.AlloraHomeDir
-	}
+// Used
+// var cdc = codec.NewProtoCodec(codectypes.NewInterfaceRegistry())
 
-	// Check that the given home folder exists
-	if _, err := os.Stat(alloraClientHome); errors.Is(err, os.ErrNotExist) {
-		log.Info().Msg("Home directory does not exist, creating...")
-		err = os.MkdirAll(alloraClientHome, 0755)
-		if err != nil {
-			return nil, errorsmod.Wrap(err, "cannot create allora client home directory")
-		}
-		log.Info().Str("home", alloraClientHome).Msg("Allora client home directory created")
-	}
-
+func getAlloraRPCClient(config *UserConfig, rpc string) (alloraRpcClient *rpcclient.AlloraRPCClient, err error) {
 	httpClient, err := jsonrpc.DefaultHTTPClient(rpc)
 	if err != nil {
 		return nil, fmt.Errorf("error creating default http client")
@@ -60,105 +46,50 @@ func getAlloraClient(config *UserConfig, rpc string) (*cosmosclient.Client, erro
 		return nil, fmt.Errorf("unexpected transport type: %T", httpClient.Transport)
 	}
 
-	rpcClient, err := rpchttp.NewWithClient(rpc, "/websocket", httpClient)
+	cmtCli, err := cometrpc.NewWithClient(rpc, "/websocket", httpClient)
 	if err != nil {
-		return nil, fmt.Errorf("error creating rpc client")
+		return nil, fmt.Errorf("error creating comet rpc client")
 	}
 
-	client, err := cosmosclient.New(ctx,
-		cosmosclient.WithNodeAddress(rpc),
-		cosmosclient.WithAddressPrefix(ADDRESS_PREFIX),
-		cosmosclient.WithHome(alloraClientHome),
-		cosmosclient.WithGas(config.Wallet.Gas),
-		cosmosclient.WithGasAdjustment(config.Wallet.GasAdjustment),
-		cosmosclient.WithAccountRetriever(authtypes.AccountRetriever{}),
-		cosmosclient.WithRPCClient(rpcClient),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &client, nil
+	return &rpcclient.AlloraRPCClient{Client: cmtCli}, nil
 }
 
-func (c *UserConfig) GenerateNodeConfig(rpc string) (*NodeConfig, error) {
-	client, err := getAlloraClient(c, rpc)
-	if err != nil {
-		return nil, err
+func (c *UserConfig) GenerateNodeConfig(ctx context.Context, wallet *Wallet, mode int, endpoint string) (nodeConfig *NodeConfig, err error) {
+	log.Info().Str("endpoint", endpoint).Str("address", wallet.Address).Msg("Allora client created successfully")
+
+	Node := NodeConfig{ // nolint: exhaustruct
+		ServerAddress: endpoint,
+		Chain:         ChainConfig{}, // nolint: exhaustruct
 	}
-	var account *cosmosaccount.Account
-	// if we're giving a keyring ring name, with no mnemonic restore
-	if c.Wallet.AddressRestoreMnemonic == "" && c.Wallet.AddressKeyName != "" {
-		// get account from the keyring
-		acc, err := client.Account(c.Wallet.AddressKeyName)
+
+	// Get RPC allora client
+	var rpcClient *rpcclient.AlloraRPCClient
+	if mode == RPC_MODE {
+		rpcClient, err = getAlloraRPCClient(c, endpoint)
 		if err != nil {
-			log.Error().Err(err).Msg("could not retrieve account from keyring")
-		} else {
-			account = &acc
+			return nil, err
 		}
-	} else if c.Wallet.AddressRestoreMnemonic != "" && c.Wallet.AddressKeyName != "" {
-		// restore from mnemonic
-		acc, err := client.AccountRegistry.Import(c.Wallet.AddressKeyName, c.Wallet.AddressRestoreMnemonic, "")
+		Node.Chain.RPCClient = rpcClient
+		Node.ServerAddress = endpoint
+		log.Info().Msgf("RPC Node initialized successfully %s", endpoint)
+	}
+
+	// Get GRPC allora client
+	if mode == GRPC_MODE {
+		grpcConn, err := grpcclient.InitializeGRPCClient(ctx, endpoint)
 		if err != nil {
-			if err.Error() == "account already exists" {
-				acc, err = client.Account(c.Wallet.AddressKeyName)
-			}
-			if err != nil {
-				log.Err(err).Msg("could not restore account from mnemonic")
-			} else {
-				account = &acc
-			}
-		} else {
-			account = &acc
+			return nil, errorsmod.Wrap(err, "failed to initialize gRPC client")
 		}
-	} else {
-		return nil, errors.New("no allora account was loaded")
+		Node.Chain.GRPCClient = grpcConn
+		// Create query client
+		Node.Chain.EmissionsQueryClient = emissionstypes.NewQueryServiceClient(grpcConn)
+
+		Node.Chain.BankQueryClient = banktypes.NewQueryClient(grpcConn)
+		Node.Chain.AuthQueryClient = authtypes.NewQueryClient(grpcConn)
+		Node.Chain.FeeMarketQueryClient = feemarkettypes.NewQueryClient(grpcConn)
+		Node.Chain.CometQueryClient = cmtservice.NewServiceClient(grpcConn)
+		Node.Chain.TxServiceClient = txtypes.NewServiceClient(grpcConn)
+		log.Info().Msgf("GRPC Node initialized successfully %s", endpoint)
 	}
-
-	if account == nil {
-		return nil, errors.New("no allora account was loaded")
-	}
-
-	address, err := account.Address(ADDRESS_PREFIX)
-	if err != nil {
-		log.Err(err).Msg("could not retrieve allora blockchain address, transactions will not be submitted to chain")
-	}
-
-	// Create query client
-	queryClient := emissionstypes.NewQueryServiceClient(client.Context())
-
-	// Create bank client
-	bankClient := banktypes.NewQueryClient(client.Context())
-
-	// Where other clients are initialized, add:
-	feeMarketQueryClient := feemarkettypes.NewQueryClient(client.Context())
-
-	// Check chainId is set
-	if client.Context().ChainID == "" {
-		return nil, errors.New("ChainId is empty")
-	}
-
-	c.Wallet.Address = address // Overwrite the address with the one from the keystore
-
-	log.Info().Str("rpc", rpc).Str("address", address).Msg("Allora client created successfully")
-
-	alloraChain := ChainConfig{
-		Address:              address,
-		AddressPrefix:        ADDRESS_PREFIX,
-		DefaultBondDenom:     DEFAULT_BOND_DENOM,
-		Account:              *account,
-		Client:               client,
-		EmissionsQueryClient: queryClient,
-		BankQueryClient:      bankClient,
-		FeeMarketQueryClient: feeMarketQueryClient,
-	}
-
-	Node := NodeConfig{
-		RPC:     rpc,
-		Chain:   alloraChain,
-		Wallet:  c.Wallet,
-		Worker:  c.Worker,
-		Reputer: c.Reputer,
-	}
-
 	return &Node, nil
 }
