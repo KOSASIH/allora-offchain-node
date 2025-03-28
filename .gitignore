@@ -27,3 +27,6 @@ go.work.sum
 .env
 .allorad
 config.json
+
+.DS_Store
+**/__debug*

@@ -56,6 +56,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 
+## v0.10.0
+
+### Added
+
+### Changed
+
+* [#117](https://github.com/allora-network/allora-offchain-node/pull/117) Input layer changes v0.10.x
+
+### Fixed
+
+### Removed
+
+### Fixed
+
+### Security
+
+
+
 ## v0.9.1
 
 ### Added

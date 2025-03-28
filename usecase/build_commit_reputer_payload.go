@@ -93,19 +93,19 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 	return nil
 }
 
-func (suite *UseCaseSuite) ComputeLossBundle(sourceTruth string, vb *emissionstypes.ValueBundle, reputer lib.ReputerConfig) (emissionstypes.ValueBundle, error) {
+func (suite *UseCaseSuite) ComputeLossBundle(sourceTruth string, vb *emissionstypes.ValueBundle, reputer lib.ReputerConfig) (emissionstypes.InputValueBundle, error) {
 	if vb == nil {
-		return emissionstypes.ValueBundle{}, errors.New("nil ValueBundle")
+		return emissionstypes.InputValueBundle{}, errors.New("nil ValueBundle")
 	}
 	// Check if vb is empty
 	if IsEmpty(*vb) {
-		return emissionstypes.ValueBundle{}, errors.New("empty ValueBundle")
+		return emissionstypes.InputValueBundle{}, errors.New("empty ValueBundle")
 	}
 	if err := emissionstypes.ValidateDec(vb.CombinedValue); err != nil {
-		return emissionstypes.ValueBundle{}, errors.New("ValueBundle - invalid CombinedValue")
+		return emissionstypes.InputValueBundle{}, errors.New("ValueBundle - invalid CombinedValue")
 	}
 	if err := emissionstypes.ValidateDec(vb.NaiveValue); err != nil {
-		return emissionstypes.ValueBundle{}, errors.New("ValueBundle - invalid NaiveValue")
+		return emissionstypes.InputValueBundle{}, errors.New("ValueBundle - invalid NaiveValue")
 	}
 
 	lossMethodOptions := reputer.LossFunctionParameters.LossMethodOptions
@@ -117,13 +117,13 @@ func (suite *UseCaseSuite) ComputeLossBundle(sourceTruth string, vb *emissionsty
 		var err error
 		isNeverNegative, err = reputer.LossFunctionEntrypoint.IsLossFunctionNeverNegative(reputer, lossMethodOptions)
 		if err != nil {
-			return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "failed to determine if loss function is never negative")
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "failed to determine if loss function is never negative")
 		}
 		// cache the result
 		reputer.LossFunctionParameters.IsNeverNegative = &isNeverNegative
 	}
 
-	losses := emissionstypes.ValueBundle{ // nolint: exhaustruct
+	losses := emissionstypes.InputValueBundle{ // nolint: exhaustruct
 		TopicId:             vb.TopicId,
 		ReputerRequestNonce: vb.ReputerRequestNonce,
 		Reputer:             vb.Reputer,
@@ -157,81 +157,129 @@ func (suite *UseCaseSuite) ComputeLossBundle(sourceTruth string, vb *emissionsty
 
 	// Combined Value
 	if combinedLoss, err := computeLoss(vb.CombinedValue, "combined value"); err != nil {
-		return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for combined value")
+		return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for combined value")
 	} else {
-		losses.CombinedValue = combinedLoss
+		losses.CombinedValue, err = alloraMath.NewBoundedExp40Dec(combinedLoss)
+		if err != nil {
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting combined loss to BoundedExp40Dec")
+		}
 	}
 
 	// Naive Value
 	if naiveLoss, err := computeLoss(vb.NaiveValue, "naive value"); err != nil {
-		return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for naive value")
+		return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for naive value")
 	} else {
-		losses.NaiveValue = naiveLoss
+		losses.NaiveValue, err = alloraMath.NewBoundedExp40Dec(naiveLoss)
+		if err != nil {
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+		}
 	}
 
 	// Inferer Values
-	losses.InfererValues = make([]*emissionstypes.WorkerAttributedValue, len(vb.InfererValues))
+	losses.InfererValues = make([]*emissionstypes.InputWorkerAttributedValue, len(vb.InfererValues))
 	for i, val := range vb.InfererValues {
 		if loss, err := computeLoss(val.Value, fmt.Sprintf("inferer value %d", i)); err != nil {
-			return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for inferer value")
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for inferer value")
 		} else {
-			losses.InfererValues[i] = &emissionstypes.WorkerAttributedValue{Worker: val.Worker, Value: loss}
+			boundedLoss, err := alloraMath.NewBoundedExp40Dec(loss)
+			if err != nil {
+				return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+			}
+			losses.InfererValues[i] = &emissionstypes.InputWorkerAttributedValue{Worker: val.Worker, Value: boundedLoss}
 		}
 	}
 
 	// Forecaster Values
-	losses.ForecasterValues = make([]*emissionstypes.WorkerAttributedValue, len(vb.ForecasterValues))
+	losses.ForecasterValues = make([]*emissionstypes.InputWorkerAttributedValue, len(vb.ForecasterValues))
 	for i, val := range vb.ForecasterValues {
 		if loss, err := computeLoss(val.Value, fmt.Sprintf("forecaster value %d", i)); err != nil {
-			return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for forecaster value")
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for forecaster value")
 		} else {
-			losses.ForecasterValues[i] = &emissionstypes.WorkerAttributedValue{Worker: val.Worker, Value: loss}
+			boundedLoss, err := alloraMath.NewBoundedExp40Dec(loss)
+			if err != nil {
+				return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+			}
+			losses.ForecasterValues[i] = &emissionstypes.InputWorkerAttributedValue{Worker: val.Worker, Value: boundedLoss}
 		}
 	}
 
 	// One Out Inferer Values
-	losses.OneOutInfererValues = make([]*emissionstypes.WithheldWorkerAttributedValue, len(vb.OneOutInfererValues))
+	losses.OneOutInfererValues = make([]*emissionstypes.InputWithheldWorkerAttributedValue, len(vb.OneOutInfererValues))
 	for i, val := range vb.OneOutInfererValues {
 		if loss, err := computeLoss(val.Value, fmt.Sprintf("one out inferer value %d", i)); err != nil {
-			return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-out inferer value")
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-out inferer value")
 		} else {
-			losses.OneOutInfererValues[i] = &emissionstypes.WithheldWorkerAttributedValue{Worker: val.Worker, Value: loss}
+			boundedLoss, err := alloraMath.NewBoundedExp40Dec(loss)
+			if err != nil {
+				return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+			}
+			losses.OneOutInfererValues[i] = &emissionstypes.InputWithheldWorkerAttributedValue{Worker: val.Worker, Value: boundedLoss}
 		}
 	}
 
 	// One Out Forecaster Values
-	losses.OneOutForecasterValues = make([]*emissionstypes.WithheldWorkerAttributedValue, len(vb.OneOutForecasterValues))
+	losses.OneOutForecasterValues = make([]*emissionstypes.InputWithheldWorkerAttributedValue, len(vb.OneOutForecasterValues))
 	for i, val := range vb.OneOutForecasterValues {
 		if loss, err := computeLoss(val.Value, fmt.Sprintf("one out forecaster value %d", i)); err != nil {
-			return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-out forecaster value")
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-out forecaster value")
 		} else {
-			losses.OneOutForecasterValues[i] = &emissionstypes.WithheldWorkerAttributedValue{Worker: val.Worker, Value: loss}
+			boundedLoss, err := alloraMath.NewBoundedExp40Dec(loss)
+			if err != nil {
+				return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+			}
+			losses.OneOutForecasterValues[i] = &emissionstypes.InputWithheldWorkerAttributedValue{Worker: val.Worker, Value: boundedLoss}
 		}
 	}
 
 	// One In Forecaster Values
-	losses.OneInForecasterValues = make([]*emissionstypes.WorkerAttributedValue, len(vb.OneInForecasterValues))
+	losses.OneInForecasterValues = make([]*emissionstypes.InputWorkerAttributedValue, len(vb.OneInForecasterValues))
 	for i, val := range vb.OneInForecasterValues {
 		if loss, err := computeLoss(val.Value, fmt.Sprintf("one in forecaster value %d", i)); err != nil {
-			return emissionstypes.ValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-in forecaster value")
+			return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-in forecaster value")
 		} else {
-			losses.OneInForecasterValues[i] = &emissionstypes.WorkerAttributedValue{Worker: val.Worker, Value: loss}
+			boundedLoss, err := alloraMath.NewBoundedExp40Dec(loss)
+			if err != nil {
+				return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+			}
+			losses.OneInForecasterValues[i] = &emissionstypes.InputWorkerAttributedValue{Worker: val.Worker, Value: boundedLoss}
 		}
 	}
+
+	losses.OneOutInfererForecasterValues = make([]*emissionstypes.InputOneOutInfererForecasterValues, len(vb.OneOutInfererForecasterValues))
+	for i, val := range vb.OneOutInfererForecasterValues {
+		oneOutInfererValues := make([]*emissionstypes.InputWithheldWorkerAttributedValue, len(val.OneOutInfererValues))
+		for j, infererVal := range val.OneOutInfererValues {
+			if loss, err := computeLoss(infererVal.Value, fmt.Sprintf("one out inferer value %d", j)); err != nil {
+				return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error computing loss for one-out inferer value")
+			} else {
+				boundedLoss, err := alloraMath.NewBoundedExp40Dec(loss)
+				if err != nil {
+					return emissionstypes.InputValueBundle{}, errorsmod.Wrapf(err, "error converting naive loss to BoundedExp40Dec")
+				}
+				oneOutInfererValues[j] = &emissionstypes.InputWithheldWorkerAttributedValue{Worker: infererVal.Worker, Value: boundedLoss}
+			}
+		}
+
+		losses.OneOutInfererForecasterValues[i] = &emissionstypes.InputOneOutInfererForecasterValues{
+			Forecaster:          val.Forecaster,
+			OneOutInfererValues: oneOutInfererValues,
+		}
+	}
+
 	return losses, nil
 }
 
-func (suite *UseCaseSuite) SignReputerValueBundle(valueBundle *emissionstypes.ValueBundle) (*emissionstypes.ReputerValueBundle, error) {
+func (suite *UseCaseSuite) SignReputerValueBundle(valueBundle *emissionstypes.InputValueBundle) (*emissionstypes.InputReputerValueBundle, error) {
 	wallet, err := suite.ConnectionManager.GetWallet()
 	if err != nil {
-		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
+		return &emissionstypes.InputReputerValueBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
 	}
 	sig, pk, err := auth.MarshalAndSignByPrivKey(valueBundle, wallet.GetPrivKey(), wallet.AddressSDK)
 	if err != nil {
-		return &emissionstypes.ReputerValueBundle{}, errorsmod.Wrapf(err, "error signing the InferenceForecastsBundle message") // nolint: exhaustruct
+		return &emissionstypes.InputReputerValueBundle{}, errorsmod.Wrapf(err, "error signing the InferenceForecastsBundle message") // nolint: exhaustruct
 	}
 	pkStr := hex.EncodeToString(pk)
-	reputerValueBundle := &emissionstypes.ReputerValueBundle{
+	reputerValueBundle := &emissionstypes.InputReputerValueBundle{
 		ValueBundle: valueBundle,
 		Signature:   sig,
 		Pubkey:      pkStr,

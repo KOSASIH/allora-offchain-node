@@ -40,6 +40,7 @@ const (
 	DefaultKeyringBackend                string  = "test"
 	DefaultGasAdjustment                 float64 = 1.2
 	DefaultSimulateGasFromStart          bool    = false
+	DefaultGrpcInsecure                  bool    = false
 )
 
 // Properties manually provided by the user as part of UserConfig
@@ -71,7 +72,7 @@ type WalletConfig struct {
 	TimeoutRPCSecondsTx           int64                   // timeout for rpc data send in seconds, including retries
 	TimeoutRPCSecondsRegistration int64                   // timeout for rpc registration in seconds, including retries
 	TimeoutHTTPConnection         int64                   // timeout for http connection in seconds
-
+	GrpcInsecure                  bool                    // use insecure grpc connection
 }
 
 // Communication with the chain

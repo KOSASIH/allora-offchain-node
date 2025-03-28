@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -61,7 +62,7 @@ func monitorGRPCConnection(ctx context.Context, grpcConnnection *grpc.ClientConn
 }
 
 // Initializes a gRPC client for the given endpoint
-func InitializeGRPCClient(ctx context.Context, grpcEndpoint string) (grpcConnection *grpc.ClientConn, err error) {
+func InitializeGRPCClient(ctx context.Context, grpcEndpoint string, insecureFlag bool) (grpcConnection *grpc.ClientConn, err error) {
 	var dialOptions []grpc.DialOption
 
 	kaOpts := keepalive.ClientParameters{
@@ -79,8 +80,14 @@ func InitializeGRPCClient(ctx context.Context, grpcEndpoint string) (grpcConnect
 			grpc.ForceCodec(customCodec),
 		),
 	)
-	creds := credentials.NewClientTLSFromCert(nil, "")
-	dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
+
+	if insecureFlag {
+		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else {
+		creds := credentials.NewClientTLSFromCert(nil, "")
+		dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
+	}
+
 	// Add interceptor for logging if needed
 	// dialOptions = append(dialOptions, grpc.WithUnaryInterceptor(loggerHeaderInterceptor()))
 	log.Debug().Interface("dialOptions", dialOptions).Str("target", grpcEndpoint).Msg("Dial options")

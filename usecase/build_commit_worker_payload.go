@@ -95,20 +95,20 @@ func (suite *UseCaseSuite) BuildCommitWorkerPayload(ctx context.Context, worker 
 	return nil
 }
 
-func (suite *UseCaseSuite) BuildWorkerPayload(workerResponse lib.WorkerResponse, nonce emissionstypes.BlockHeight) (emissionstypes.InferenceForecastBundle, error) {
+func (suite *UseCaseSuite) BuildWorkerPayload(workerResponse lib.WorkerResponse, nonce emissionstypes.BlockHeight) (emissionstypes.InputInferenceForecastBundle, error) {
 	wallet, err := suite.ConnectionManager.GetWallet()
 	if err != nil {
-		return emissionstypes.InferenceForecastBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
+		return emissionstypes.InputInferenceForecastBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
 	}
 
-	inferenceForecastsBundle := emissionstypes.InferenceForecastBundle{} // nolint: exhaustruct
+	inferenceForecastsBundle := emissionstypes.InputInferenceForecastBundle{} // nolint: exhaustruct
 
 	if workerResponse.InfererValue != "" {
-		infererValue, err := alloraMath.NewDecFromString(workerResponse.InfererValue)
+		infererValue, err := alloraMath.NewBoundedExp40DecFromString(workerResponse.InfererValue)
 		if err != nil {
-			return emissionstypes.InferenceForecastBundle{}, errorsmod.Wrapf(err, "error converting infererValue to Dec") // nolint: exhaustruct
+			return emissionstypes.InputInferenceForecastBundle{}, errorsmod.Wrapf(err, "error converting infererValue to Dec") // nolint: exhaustruct
 		}
-		builtInference := &emissionstypes.Inference{ // nolint: exhaustruct
+		builtInference := &emissionstypes.InputInference{ // nolint: exhaustruct
 			TopicId:     workerResponse.TopicId,
 			Inferer:     wallet.Address,
 			Value:       infererValue,
@@ -118,24 +118,25 @@ func (suite *UseCaseSuite) BuildWorkerPayload(workerResponse lib.WorkerResponse,
 	}
 
 	if len(workerResponse.ForecasterValues) > 0 {
-		var forecasterElements []*emissionstypes.ForecastElement // nolint: exhaustruct
+		var forecasterElements []*emissionstypes.InputForecastElement // nolint: exhaustruct
 		for _, val := range workerResponse.ForecasterValues {
-			decVal, err := alloraMath.NewDecFromString(val.Value)
+			decVal, err := alloraMath.NewBoundedExp40DecFromString(val.Value)
 			if err != nil {
-				return emissionstypes.InferenceForecastBundle{}, errorsmod.Wrapf(err, "error converting forecasterValue to Dec") // nolint: exhaustruct
+				return emissionstypes.InputInferenceForecastBundle{}, errorsmod.Wrapf(err, "error converting forecasterValue to Dec") // nolint: exhaustruct
 			}
-			forecasterElements = append(forecasterElements, &emissionstypes.ForecastElement{
+			forecasterElements = append(forecasterElements, &emissionstypes.InputForecastElement{
 				Inferer: val.Worker,
 				Value:   decVal,
 			})
 		}
 
 		if len(forecasterElements) > 0 {
-			forecasterValues := &emissionstypes.Forecast{ // nolint: exhaustruct
+			forecasterValues := &emissionstypes.InputForecast{ // nolint: exhaustruct
 				TopicId:          workerResponse.TopicId,
 				BlockHeight:      nonce,
 				Forecaster:       wallet.Address,
 				ForecastElements: forecasterElements,
+				ExtraData:        nil,
 			}
 			inferenceForecastsBundle.Forecast = forecasterValues
 		}
@@ -143,19 +144,19 @@ func (suite *UseCaseSuite) BuildWorkerPayload(workerResponse lib.WorkerResponse,
 	return inferenceForecastsBundle, nil
 }
 
-func (suite *UseCaseSuite) SignWorkerPayload(workerPayload *emissionstypes.InferenceForecastBundle) (*emissionstypes.WorkerDataBundle, error) {
+func (suite *UseCaseSuite) SignWorkerPayload(workerPayload *emissionstypes.InputInferenceForecastBundle) (*emissionstypes.InputWorkerDataBundle, error) {
 	// Marshal and sign the bundle
 	wallet, err := suite.ConnectionManager.GetWallet()
 	if err != nil {
-		return &emissionstypes.WorkerDataBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
+		return &emissionstypes.InputWorkerDataBundle{}, errorsmod.Wrapf(err, "error getting wallet") // nolint: exhaustruct
 	}
 	sig, pk, err := auth.MarshalAndSignByPrivKey(workerPayload, wallet.GetPrivKey(), wallet.AddressSDK)
 	if err != nil {
-		return &emissionstypes.WorkerDataBundle{}, errorsmod.Wrapf(err, "error signing the InferenceForecastsBundle message") // nolint: exhaustruct
+		return &emissionstypes.InputWorkerDataBundle{}, errorsmod.Wrapf(err, "error signing the InferenceForecastsBundle message") // nolint: exhaustruct
 	}
 	pkStr := hex.EncodeToString(pk)
 	// Create workerDataBundle with signature
-	workerDataBundle := &emissionstypes.WorkerDataBundle{ // nolint: exhaustruct
+	workerDataBundle := &emissionstypes.InputWorkerDataBundle{ // nolint: exhaustruct
 		Worker:                             wallet.Address,
 		InferenceForecastsBundle:           workerPayload,
 		InferencesForecastsBundleSignature: sig,

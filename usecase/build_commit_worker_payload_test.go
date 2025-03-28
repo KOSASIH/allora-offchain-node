@@ -147,16 +147,20 @@ func TestComputeWorkerBundle(t *testing.T) {
 				assert.Equal(t, tt.expectedResponse.Inference.BlockHeight, response.Inference.BlockHeight)
 				assert.Equal(t, tt.expectedResponse.Inference.Inferer, response.Inference.Inferer)
 				assert.Equal(t, tt.expectedResponse.Inference.TopicId, response.Inference.TopicId)
-				assert.Equal(t, tt.expectedResponse.Inference.Value, response.Inference.Value)
+				infererValueDec, err := response.Inference.Value.ToDec()
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedResponse.Inference.Value, infererValueDec)
 				assert.Equal(t, tt.expectedResponse.Forecast.BlockHeight, response.Forecast.BlockHeight)
 				assert.Equal(t, tt.expectedResponse.Forecast.Forecaster, response.Forecast.Forecaster)
 				assert.Equal(t, tt.expectedResponse.Forecast.TopicId, response.Forecast.TopicId)
-				assert.Equal(t, tt.expectedResponse.Forecast.ForecastElements, response.Forecast.ForecastElements)
 				assert.Equal(t, len(tt.expectedResponse.Forecast.ForecastElements), len(response.Forecast.ForecastElements))
+				// element value matching
 				for _, expectedElement := range tt.expectedResponse.Forecast.ForecastElements {
 					found := false
 					for _, actualElement := range response.Forecast.ForecastElements {
-						if expectedElement.Inferer == actualElement.Inferer && expectedElement.Value.Equal(actualElement.Value) {
+						actualElementDec, err := actualElement.Value.ToDec()
+						require.NoError(t, err)
+						if expectedElement.Inferer == actualElement.Inferer && expectedElement.Value.Equal(actualElementDec) {
 							found = true
 							break
 						}

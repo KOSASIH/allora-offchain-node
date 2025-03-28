@@ -76,7 +76,7 @@ func (c *UserConfig) GenerateNodeConfig(ctx context.Context, wallet *Wallet, mod
 
 	// Get GRPC allora client
 	if mode == GRPC_MODE {
-		grpcConn, err := grpcclient.InitializeGRPCClient(ctx, endpoint)
+		grpcConn, err := grpcclient.InitializeGRPCClient(ctx, endpoint, c.Wallet.GrpcInsecure)
 		if err != nil {
 			return nil, errorsmod.Wrap(err, "failed to initialize gRPC client")
 		}

@@ -135,7 +135,7 @@ func main() {
 	// Check and set defaults for the user config if any values are not set
 	finalUserConfig.CheckAndSetDefaults()
 
-	// Creates the ConnectionManagerand initialises the NodeConfigs
+	// Creates the ConnectionManager and initialises the NodeConfigs
 	connectionManager, err := lib.NewConnectionManager(sigCtx, finalUserConfig)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize ConnectionManager, exiting")

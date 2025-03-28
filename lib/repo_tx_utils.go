@@ -149,7 +149,7 @@ func SendTransactionViaRPC(ctx context.Context,
 	msgs ...sdktypes.Msg,
 ) (*coretypes.ResultBroadcastTx, string, error) {
 	log.Debug().Msgf("Sending transaction via RPC to %s", rpcEndpoint)
-	// Build and sign the transaction
+	// Build and sign the transaction to get the bytes
 	encodingConfig := transaction.GetEncodingConfig()
 	txBytes, err := transaction.BuildAndSignTransaction(ctx, txParams, encodingConfig, msgs...)
 	if err != nil {
@@ -163,6 +163,7 @@ func SendTransactionViaRPC(ctx context.Context,
 			txParams,
 			encodingConfig,
 			queryNode.ConnectionManager.walletConfig.MaxRetries,
+			txBytes,
 			msgs...)
 		if err != nil {
 			return nil, "", err
@@ -188,15 +189,11 @@ func simulateWithSequenceRetry(
 	txParams *types.TransactionParams,
 	encodingConfig testutil.TestEncodingConfig,
 	maxRetries int64,
+	initialTxBytes []byte,
 	msgs ...sdktypes.Msg,
 ) (gas uint64, txBytes []byte, err error) {
 
-	// Initial tx build
-	txBytes, err = transaction.BuildAndSignTransaction(ctx, txParams, encodingConfig, msgs...)
-	if err != nil {
-		return 0, nil, err
-	}
-
+	txBytes = initialTxBytes
 	for retryCount := int64(0); retryCount <= maxRetries; retryCount++ {
 		log.Debug().Msgf("Simulating tx with sequence retry %d/%d", retryCount, maxRetries)
 		gas, err = queryNode.SimulateTxWithFallback(ctx, txBytes)
@@ -220,6 +217,7 @@ func simulateWithSequenceRetry(
 			txParams.Sequence = expected
 
 			// Rebuild tx with new sequence
+			log.Debug().Msgf("Rebuilding tx with new sequence %d", expected)
 			txBytes, err = transaction.BuildAndSignTransaction(ctx, txParams, encodingConfig, msgs...)
 			if err != nil {
 				return 0, nil, err
