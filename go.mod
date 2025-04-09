@@ -11,7 +11,7 @@ toolchain go1.23.6
 require (
 	cosmossdk.io/errors v1.0.1
 	cosmossdk.io/math v1.4.0
-	github.com/allora-network/allora-chain v0.9.1-0.20250327190439-024f361fe60a
+	github.com/allora-network/allora-chain v0.10.0
 	github.com/cometbft/cometbft v0.38.17
 	github.com/cosmos/cosmos-sdk v0.50.13
 	github.com/cosmos/gogoproto v1.7.0

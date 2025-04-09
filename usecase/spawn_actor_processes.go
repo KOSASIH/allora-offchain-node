@@ -61,7 +61,7 @@ func (suite *UseCaseSuite) launchGasRoutine(ctx context.Context, walletConfig *l
 }
 
 // Spawns the actor processes and any associated non-essential routines
-func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
+func (suite *UseCaseSuite) Start() error {
 
 	wallet, err := suite.ConnectionManager.GetWallet()
 	if err != nil {
@@ -74,7 +74,7 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
 		return err
 	}
 	if walletConfig.GasPrices == lib.AutoGasPrices {
-		if err := suite.launchGasRoutine(ctx, walletConfig, wallet); err != nil {
+		if err := suite.launchGasRoutine(suite.nonEssentialCtx, walletConfig, wallet); err != nil {
 			return err
 		}
 	} else {
@@ -88,11 +88,13 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
 		}
 	}
 
+	// WaitGroup for essential routines
 	var wg sync.WaitGroup
 	essentialDone := make(chan struct{}) // Channel for essential routines to signal when they are done
 
 	// Run worker process per topic
 	alreadyStartedWorkerForTopic := make(map[emissionstypes.TopicId]bool)
+workerLoop:
 	for _, worker := range suite.UserConfig.Worker {
 		if _, ok := alreadyStartedWorkerForTopic[worker.TopicId]; ok {
 			log.Warn().Uint64("topicId", worker.TopicId).Msg("Worker already started for topicId")
@@ -100,20 +102,26 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
 		}
 		alreadyStartedWorkerForTopic[worker.TopicId] = true
 
-		wg.Add(1)
-		go func(worker lib.WorkerConfig) {
-			defer wg.Done()
-			select {
-			case <-ctx.Done():
-				log.Info().Uint64("topicId", worker.TopicId).Msg("Worker process received shutdown signal")
-				return
-			default:
-				suite.runWorkerProcess(ctx, worker)
-			}
-			log.Info().Uint64("topicId", worker.TopicId).Msg("Worker process finished")
-		}(worker)
+		select {
+		case <-suite.essentialCtx.Done():
+			log.Info().Msg("Context cancelled, not starting more workers")
+			break workerLoop // Exit loop
+		default:
+			wg.Add(1)
+			go func(worker lib.WorkerConfig) {
+				defer wg.Done()
+				select {
+				case <-suite.essentialCtx.Done():
+					log.Info().Uint64("topicId", worker.TopicId).Msg("Worker process received shutdown signal")
+					return
+				default:
+					suite.runWorkerProcess(suite.essentialCtx, worker)
+				}
+				log.Info().Uint64("topicId", worker.TopicId).Msg("Worker process finished")
+			}(worker)
+		}
 
-		if lib.DoneOrWait(ctx, walletConfig.LaunchRoutineDelay) {
+		if lib.DoneOrWait(suite.essentialCtx, walletConfig.LaunchRoutineDelay) {
 			log.Error().Msg("Worker process finished")
 			suite.Metrics.IncrementMetricsCounter(metrics.WorkerProcessFinishedCount, wallet.Address, worker.TopicId)
 		}
@@ -121,6 +129,7 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
 
 	// Run reputer process per topic
 	alreadyStartedReputerForTopic := make(map[emissionstypes.TopicId]bool)
+reputerLoop:
 	for _, reputer := range suite.UserConfig.Reputer {
 		if _, ok := alreadyStartedReputerForTopic[reputer.TopicId]; ok {
 			log.Warn().Uint64("topicId", reputer.TopicId).Msg("Reputer already started for topicId")
@@ -128,20 +137,26 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
 		}
 		alreadyStartedReputerForTopic[reputer.TopicId] = true
 
-		wg.Add(1)
-		go func(reputer lib.ReputerConfig) {
-			defer wg.Done()
-			select {
-			case <-ctx.Done():
-				log.Info().Uint64("topicId", reputer.TopicId).Msg("Reputer process received shutdown signal")
-				return
-			default:
-				suite.runReputerProcess(ctx, reputer)
-			}
-			log.Info().Uint64("topicId", reputer.TopicId).Msg("Reputer process finished")
-		}(reputer)
+		select {
+		case <-suite.essentialCtx.Done():
+			log.Info().Msg("Context cancelled, not starting more reputers")
+			break reputerLoop // Exit loop
+		default:
+			wg.Add(1)
+			go func(reputer lib.ReputerConfig) {
+				defer wg.Done()
+				select {
+				case <-suite.essentialCtx.Done():
+					log.Info().Uint64("topicId", reputer.TopicId).Msg("Reputer process received shutdown signal")
+					return
+				default:
+					suite.runReputerProcess(suite.essentialCtx, reputer)
+				}
+				log.Info().Uint64("topicId", reputer.TopicId).Msg("Reputer process finished")
+			}(reputer)
+		}
 
-		if lib.DoneOrWait(ctx, walletConfig.LaunchRoutineDelay) {
+		if lib.DoneOrWait(suite.essentialCtx, walletConfig.LaunchRoutineDelay) {
 			log.Error().Msg("Reputer process finished")
 			suite.Metrics.IncrementMetricsCounter(metrics.ReputerProcessFinishedCount, wallet.Address, reputer.TopicId)
 		}
@@ -155,6 +170,7 @@ func (suite *UseCaseSuite) Spawn(ctx context.Context) error {
 	}()
 
 	<-essentialDone // Block until all essential routines are done
+	log.Info().Msg("Essential routines channel unblocked")
 	return nil
 }
 

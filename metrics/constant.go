@@ -15,7 +15,7 @@ const (
 	ReputerChainSubmissionCount    string = "allora_reputer_chain_submission_count"
 	WorkerProcessFinishedCount     string = "allora_worker_process_finished_count"
 	ReputerProcessFinishedCount    string = "allora_reputer_process_finished_count"
-	ApplicationFinishedCount       string = "allora_application_finished_count"
+	ApplicationStartedCount        string = "allora_application_started_count"
 	GRPCConnectionLostCount        string = "allora_grpc_connection_lost_count"
 	GRPCReconnectionCount          string = "allora_grpc_reconnection_count"
 	GRPCConnectionPermanentFailure string = "allora_grpc_connection_permanent_failure"
@@ -32,7 +32,7 @@ var CounterData = []MetricsCounter{
 	{ReputerChainSubmissionCount, "The total number of reputer commits to the chain", DefaultLabels},
 	{WorkerProcessFinishedCount, "The total number of worker processes finished", DefaultLabels},
 	{ReputerProcessFinishedCount, "The total number of reputer processes finished", DefaultLabels},
-	{ApplicationFinishedCount, "The total number of application runs finished", DefaultLabels},
+	{ApplicationStartedCount, "The total number of application started", DefaultLabels},
 	{GRPCConnectionLostCount, "The total number of times the GRPC connection is lost", EndpointLabels},
 	{GRPCReconnectionCount, "The total number of times the GRPC connection is successfully reconnected", EndpointLabels},
 	{GRPCConnectionPermanentFailure, "The total number of times the GRPC connection is lost", EndpointLabels},

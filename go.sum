@@ -49,6 +49,8 @@ github.com/allora-network/allora-chain v0.9.1-0.20250326154819-9ccd3205d087 h1:+
 github.com/allora-network/allora-chain v0.9.1-0.20250326154819-9ccd3205d087/go.mod h1:spph1WnH5d7qo2tDpkCshgNGL1qAlhtpL9te4Zcx8IU=
 github.com/allora-network/allora-chain v0.9.1-0.20250327190439-024f361fe60a h1:vS1bqGEMi6Aj03WRrQpjEejk9rIC3lwgYPMgXOvZeZE=
 github.com/allora-network/allora-chain v0.9.1-0.20250327190439-024f361fe60a/go.mod h1:spph1WnH5d7qo2tDpkCshgNGL1qAlhtpL9te4Zcx8IU=
+github.com/allora-network/allora-chain v0.10.0 h1:Qvvf781Wk5NlaA/bRnaFOMQtna/kAaD53dK/MZM6ie0=
+github.com/allora-network/allora-chain v0.10.0/go.mod h1:spph1WnH5d7qo2tDpkCshgNGL1qAlhtpL9te4Zcx8IU=
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/apache/thrift v0.13.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=

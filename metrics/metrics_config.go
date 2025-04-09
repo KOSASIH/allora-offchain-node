@@ -96,7 +96,9 @@ func (metrics *Metrics) IncrementMetricsCounter(counterName string, address stri
 	metrics.IncrementMetricsCounterWithLabels(counterName, address, topicStr)
 }
 
-func (metrics *Metrics) StartMetricsServer(port string) {
+// Starts the metrics server, listening on the given port,
+// controlling context cancellation and graceful shutdown
+func (metrics *Metrics) StartMetricsServer(ctx context.Context, port string) {
 	metrics.serverOnce.Do(func() {
 		http.Handle("/metrics", promhttp.Handler())
 		metrics.server = &http.Server{ // nolint:exhaustruct
@@ -107,6 +109,7 @@ func (metrics *Metrics) StartMetricsServer(port string) {
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 
+		// Start server in a goroutine
 		go func() {
 			log.Info().Msgf("Starting metrics server on %s", port)
 			if err := metrics.server.ListenAndServe(); err != http.ErrServerClosed {
@@ -114,14 +117,27 @@ func (metrics *Metrics) StartMetricsServer(port string) {
 			}
 			log.Info().Msg("Metrics server stopped")
 		}()
+
+		// Monitor non-essential context for shutdown
+		go func() {
+			<-ctx.Done()
+			log.Info().Msg("Non-essential context cancelled, shutting down metrics server...")
+			if err := metrics.Shutdown(ctx); err != nil {
+				log.Error().Err(err).Msg("Error during metrics server shutdown")
+			}
+		}()
 	})
 }
 
-// Shutdown gracefully shuts down the metrics server
+// Shutdown gracefully shuts down the metrics server with timeout
 func (metrics *Metrics) Shutdown(ctx context.Context) error {
-	if metrics.server != nil {
-		log.Info().Msg("Shutting down metrics server...")
-		return metrics.server.Shutdown(ctx)
+	if metrics.server == nil {
+		return nil
 	}
-	return nil
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	log.Info().Msg("Shutting down metrics server...")
+	return metrics.server.Shutdown(shutdownCtx)
 }

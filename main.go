@@ -63,17 +63,63 @@ func ConvertEntrypointsToInstances(userConfig lib.UserConfig) error {
 	return nil
 }
 
+func readConfig() (lib.UserConfig, error) {
+	finalUserConfig := lib.UserConfig{} // nolint: exhaustruct
+	alloraJsonConfig := os.Getenv(lib.ALLORA_OFFCHAIN_NODE_CONFIG_JSON)
+
+	if alloraJsonConfig != "" {
+		log.Info().Msg("Config using JSON env var")
+		if err := json.Unmarshal([]byte(alloraJsonConfig), &finalUserConfig); err != nil {
+			return finalUserConfig, fmt.Errorf("failed to parse JSON config from env var: %w", err)
+		}
+		return finalUserConfig, nil
+	}
+
+	configPath := os.Getenv(lib.ALLORA_OFFCHAIN_NODE_CONFIG_FILE_PATH)
+	if configPath != "" {
+		log.Info().Msg("Config using JSON config file")
+		file, err := os.Open(configPath)
+		if err != nil {
+			return finalUserConfig, fmt.Errorf("failed to open JSON config file: %w", err)
+		}
+		defer file.Close()
+
+		if err := json.NewDecoder(file).Decode(&finalUserConfig); err != nil {
+			return finalUserConfig, fmt.Errorf("failed to parse JSON config file: %w", err)
+		}
+		return finalUserConfig, nil
+	}
+
+	return finalUserConfig, fmt.Errorf("could not find config file. Please create a config.json file and pass as environment variable")
+}
+
 func main() {
 	// Context tree:
-	// root context (ctx)
-	// ├── NewUseCaseSuite initialization
-	// └── signal context (sigCtx)
-	// 	   └── Spawn process
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// root context (rootCtx)
+	// ├── essential context (essentialCtx) - for connections, wallet, workers, reputers
+	// └── non-essential context (nonEssentialCtx) - for metrics, gas price updates
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
 
-	sigCtx, sigCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer sigCancel()
+	// closed when the root context is cancelled in cascade
+	essentialCtx, essentialCancel := context.WithCancel(rootCtx)
+	nonEssentialCtx, nonEssentialCancel := context.WithCancel(rootCtx)
+
+	// Signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Info().Msg("Received shutdown signal")
+		// Cancel non-essential first
+		nonEssentialCancel()
+		// Give some time for non-essential services to cleanup
+		time.Sleep(time.Second)
+		// Then cancel essential services
+		essentialCancel()
+		// Finally cancel root context
+		rootCancel()
+	}()
 
 	// Initialize logger
 	initLogger()
@@ -91,92 +137,55 @@ func main() {
 	// Metrics
 	metrics.InitMetrics(metrics.CounterData)
 	metricsServer := metrics.GetMetrics()
-	metricsServer.StartMetricsServer(":2112")
+	metricsServer.StartMetricsServer(nonEssentialCtx, ":2112")
 
-	// Load config and do modifications if needed
-	finalUserConfig := lib.UserConfig{} // nolint: exhaustruct
-	alloraJsonConfig := os.Getenv(lib.ALLORA_OFFCHAIN_NODE_CONFIG_JSON)
-	if alloraJsonConfig != "" {
-		log.Info().Msg("Config using JSON env var")
-		// completely reset UserConfig
-		err := json.Unmarshal([]byte(alloraJsonConfig), &finalUserConfig)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to parse JSON config file from Config")
-			return
-		}
-	} else if os.Getenv(lib.ALLORA_OFFCHAIN_NODE_CONFIG_FILE_PATH) != "" {
-		log.Info().Msg("Config using JSON config file")
-		// parse file defined in CONFIG_FILE_PATH into UserConfig
-		file, err := os.Open(os.Getenv(lib.ALLORA_OFFCHAIN_NODE_CONFIG_FILE_PATH))
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to open JSON config file")
-			return
-		}
-		defer file.Close()
-		decoder := json.NewDecoder(file)
-		// completely reset UserConfig
-		err = decoder.Decode(&finalUserConfig)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to parse JSON config file")
-			return
-		}
-	} else {
-		log.Fatal().Msg("Could not find config file. Please create a config.json file and pass as environment variable.")
+	// Load config
+	userConfig, err := readConfig()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to read configuration, exiting")
 		return
 	}
 
 	// Convert entrypoints to instances of adapters
-	err := ConvertEntrypointsToInstances(finalUserConfig)
+	err = ConvertEntrypointsToInstances(userConfig)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to convert Entrypoints to instances of adapters - wrong entrypoint name?")
+		log.Error().Err(err).Msg("Failed to convert Entrypoints to instances of adapters - wrong entrypoint name? Exiting")
 		return
 	}
 
 	// Check and set defaults for the user config if any values are not set
-	finalUserConfig.CheckAndSetDefaults()
+	userConfig.CheckAndSetDefaults()
 
-	// Creates the ConnectionManager and initialises the NodeConfigs
-	connectionManager, err := lib.NewConnectionManager(sigCtx, finalUserConfig)
+	// Creates the ConnectionManager and initialises the NodeConfigs with essential context
+	connectionManager, err := lib.NewConnectionManager(essentialCtx, userConfig)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize ConnectionManager, exiting")
 		return
 	}
-	// Close the ConnectionManager when the program exits
 	defer connectionManager.Close()
 	wallet, err := connectionManager.GetWallet()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get wallet, exiting")
 		return
 	}
+	metricsServer.IncrementMetricsCounter(metrics.ApplicationStartedCount, wallet.Address, 0)
 
-	spawner, err := usecase.NewUseCaseSuite(sigCtx, finalUserConfig, connectionManager)
+	// Initialize spawner with both contexts
+	spawner, err := usecase.NewUseCaseSuite(essentialCtx, nonEssentialCtx, metricsServer, userConfig, connectionManager)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize use case, exiting")
+		log.Error().Err(err).Msg("Failed to initialize use case, exiting")
 		return
 	}
 
-	spawner.Metrics = metricsServer // cache the metrics object for ease of access on usecase suite
-
 	log.Info().Msg("Starting spawning processes...")
 	go func() {
-		err := spawner.Spawn(sigCtx)
+		err := spawner.Start()
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to spawn processes, exiting")
-			cancel()
 		}
 	}()
 
-	<-sigCtx.Done()
+	<-essentialCtx.Done()
 
-	metricsServer.IncrementMetricsCounter(metrics.ApplicationFinishedCount, wallet.Address, 0)
-	// shutdown metrics server
-	log.Info().Msg("Shutting down metrics server")
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Error shutting down metrics server")
-	}
-
-	log.Info().Msg("Stopping...")
-
+	log.Info().Msg("End of application, closing...")
 }

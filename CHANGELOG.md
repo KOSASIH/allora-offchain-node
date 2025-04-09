@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 * [#119](https://github.com/allora-network/allora-offchain-node/pull/119) GRPC client reconnection logic
+* [#118](https://github.com/allora-network/allora-offchain-node/pull/118) improve context handling
 
 ### Removed
 

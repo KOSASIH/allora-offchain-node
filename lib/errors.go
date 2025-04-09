@@ -144,7 +144,7 @@ func triageABCIErrorCode(ctx context.Context, errorCode uint32, err error, infoM
 			Err(err).
 			Str("msg", infoMsg).
 			Int64("delay", walletConfig.AccountSequenceRetryDelay).
-			Msg("Account sequence mismatch detected, retrying with fixed delay")
+			Msg("Account sequence mismatch detected, re-fetching sequence")
 		return parseAndSetNewWalletSequence(ctx, err, node, infoMsg)
 	case sdkerrors.ErrInsufficientFee.ABCICode():
 		log.Info().
