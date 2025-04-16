@@ -2,6 +2,7 @@ package lib
 
 import (
 	"context"
+	"errors"
 
 	errorsmod "cosmossdk.io/errors"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
@@ -29,6 +30,27 @@ func (node *NodeConfig) GetReputerValuesAtBlock(ctx context.Context, topicId emi
 	)
 	if err != nil {
 		return &emissionstypes.ValueBundle{}, err
+	}
+
+	if resp.NetworkInferences == nil {
+		return &emissionstypes.ValueBundle{}, errorsmod.Wrapf(errors.New("no network inferences found"), "getting reputer values: no network inferences found at block %d", nonce)
+	}
+
+	if resp.NetworkInferences.ReputerRequestNonce == nil ||
+		resp.NetworkInferences.ReputerRequestNonce.ReputerNonce == nil {
+		return &emissionstypes.ValueBundle{}, errorsmod.Wrapf(errors.New("nil reputer request nonce found"), "getting reputer values: nil reputer request nonce found at block %d", nonce)
+	}
+
+	if resp.NetworkInferences.ReputerRequestNonce.ReputerNonce.BlockHeight == 0 {
+		return &emissionstypes.ValueBundle{}, errorsmod.Wrapf(errors.New("invalid reputer request nonce found"),
+			"getting reputer values: invalid reputer request nonce %d found at block %d",
+			resp.NetworkInferences.ReputerRequestNonce.ReputerNonce.BlockHeight, nonce)
+	}
+
+	if len(resp.NetworkInferences.InfererValues) == 0 {
+		return &emissionstypes.ValueBundle{}, errorsmod.Wrapf(errors.New("no inferer values found"),
+			"getting reputer values: no inferer values found at block %d",
+			nonce)
 	}
 
 	return resp.NetworkInferences, nil
