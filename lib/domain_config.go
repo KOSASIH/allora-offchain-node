@@ -23,6 +23,7 @@ const (
 	GasPriceUpdateIntervalMin          = 5
 	RetryDelayMin                      = 1
 	AccountSequenceRetryDelayMin       = 1
+	RegistrationWaitingBlocksMin       = 1
 )
 
 // Default values
@@ -41,6 +42,7 @@ const (
 	DefaultGasAdjustment                 float64 = 1.2
 	DefaultSimulateGasFromStart          bool    = false
 	DefaultGrpcInsecure                  bool    = false
+	DefaultRegistrationWaitingBlocks     int64   = 5
 )
 
 // Properties manually provided by the user as part of UserConfig
@@ -67,6 +69,7 @@ type WalletConfig struct {
 	LaunchRoutineDelay            int64                   // number of seconds to wait between starting a routine and the next one to avoid 429 errors
 	SubmitTx                      bool                    // useful for dev/testing. set to false to run in dry-run processes without committing to the chain
 	BlockDurationEstimated        float64                 // estimated average block duration in seconds
+	RegistrationWaitingBlocks     int64                   // number of blocks to wait for a registration to be included in a block
 	WindowCorrectionFactor        float64                 // correction factor for the time estimation, suggested range 0.7-0.9.
 	TimeoutRPCSecondsQuery        int64                   // timeout for rpc queries in seconds, including retries
 	TimeoutRPCSecondsTx           int64                   // timeout for rpc data send in seconds, including retries
@@ -201,6 +204,9 @@ func (c *UserConfig) CheckAndSetDefaults() {
 	if c.Wallet.GasAdjustment == 0 {
 		c.Wallet.GasAdjustment = DefaultGasAdjustment
 	}
+	if c.Wallet.RegistrationWaitingBlocks == 0 {
+		c.Wallet.RegistrationWaitingBlocks = DefaultRegistrationWaitingBlocks
+	}
 }
 
 // Check that each assigned entrypoint in the user config actually can be used
@@ -261,6 +267,9 @@ func (c *UserConfig) ValidateWalletConfig() error {
 	}
 	if c.Wallet.GasAdjustment <= 0 {
 		return fmt.Errorf("gas adjustment must be greater than 0: %f", c.Wallet.GasAdjustment)
+	}
+	if c.Wallet.RegistrationWaitingBlocks < RegistrationWaitingBlocksMin {
+		return fmt.Errorf("registration waiting blocks lower than the minimum: %d < %d", c.Wallet.RegistrationWaitingBlocks, RegistrationWaitingBlocksMin)
 	}
 	return nil
 }

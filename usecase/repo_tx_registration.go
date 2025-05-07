@@ -93,8 +93,9 @@ func (suite *UseCaseSuite) RegisterWorkerIdempotently(ctx context.Context, confi
 	}
 
 	// Give time for the tx to be included in a block
-	log.Debug().Int64("delay", int64(walletConfig.BlockDurationEstimated)*2).Msg("Waiting to check registration status to be included in a block...")
-	if lib.DoneOrWait(ctx, int64(walletConfig.BlockDurationEstimated)*2) {
+	delay := int64(walletConfig.BlockDurationEstimated * float64(walletConfig.RegistrationWaitingBlocks))
+	log.Debug().Int64("delay", delay).Msg("Waiting to check registration status to be included in a block...")
+	if lib.DoneOrWait(ctx, delay) {
 		log.Error().Err(ctx.Err()).Str("rpc", queryNode.ServerAddress).Msg("Waiting to check registration status failed")
 		return false, ctx.Err()
 	}
@@ -177,8 +178,9 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 		}
 
 		// Give time for the tx to be included in a block
-		log.Debug().Int64("delay", int64(walletConfig.BlockDurationEstimated)*2).Msg("Waiting to check registration status to be included in a block...")
-		if lib.DoneOrWait(ctx, int64(walletConfig.BlockDurationEstimated)*2) {
+		delay := int64(walletConfig.BlockDurationEstimated * float64(walletConfig.RegistrationWaitingBlocks))
+		log.Debug().Int64("delay", delay).Msg("Waiting to check registration status to be included in a block...")
+		if lib.DoneOrWait(ctx, delay) {
 			log.Error().Err(ctx.Err()).Str("rpc", queryNode.ServerAddress).Msg("Waiting to check registration status failed")
 			return false, ctx.Err()
 		}
@@ -237,8 +239,9 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 	}
 
 	// Give time for the tx to be included in a block
-	log.Debug().Int64("delay", int64(walletConfig.BlockDurationEstimated)*2).Msg("Waiting to check stake status to be included in a block...")
-	if lib.DoneOrWait(ctx, int64(walletConfig.BlockDurationEstimated)*2) {
+	delay := int64(walletConfig.BlockDurationEstimated * float64(walletConfig.RegistrationWaitingBlocks))
+	log.Debug().Int64("delay", delay).Msg("Waiting to check stake status to be included in a block...")
+	if lib.DoneOrWait(ctx, delay) {
 		log.Error().Err(ctx.Err()).Str("rpc", queryNode.ServerAddress).Msg("Waiting to check stake status failed")
 		return false, ctx.Err()
 	}

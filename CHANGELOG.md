@@ -51,7 +51,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+### Security
+
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
 ### Fixed
+
+* [124](https://github.com/allora-network/allora-offchain-node/pull/124) Fix early exit from registration
+
+### Removed
 
 ### Security
 
@@ -68,7 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-### Fixed
 
 ### Security
 
@@ -88,10 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-### Fixed
-
 ### Security
-
 
 
 ## v0.9.1
@@ -105,8 +114,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * [#114](https://github.com/allora-network/allora-offchain-node/pull/114) Fix tx simulation(seqnum, gasAdjustment, err handling), validation, tests and minor refactor
 
 ### Removed
-
-### Fixed
 
 ### Security
 
@@ -124,7 +131,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-### Fixed
 
 ### Security
 
@@ -146,8 +152,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-### Fixed
-
 ### Security
 
 
@@ -162,8 +166,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Removed
-
-### Fixed
 
 ### Security
 
