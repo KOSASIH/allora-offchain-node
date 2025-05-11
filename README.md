@@ -20,12 +20,12 @@ chmod +x init.config
 from the root directory. This will:
    - Load your config.json file into the environment. Depending on whether you provided your wallet details or not it will also do the following:
       - Automatically create allora keys for you. You will have to request for some tokens from faucet to be able to register your worker and stake your reputer. You can find your address in ./data/env_file
-      - Automatically export the needed variables from the account created to be used by the offchain node and bundles it with the your provided config.json and then pass them to the node as environemnt variable
+      - Automatically export the needed variables from the account created to be used by the offchain node and bundles it with the your provided config.json and then pass them to the node as environment variable
 
 5. Run `docker compose up --build`. This will:
-   - Run the both the offchain node and the source services, communicating through endpoints attached to the internal dns
+   - Run both the offchain node and the source services, communicating through endpoints attached to the internal dns
 
-Please note that the environment variable will be created as bumdle of your config.json and allora account secrets, please make sure to remove every secrets before commiting to remote git repository
+Please note that the environment variable will be created as bundle of your config.json and allora account secrets, please make sure to remove every secrets before committing to remote git repository
 
 
 ## How to run without docker
@@ -152,7 +152,7 @@ Each option completely overwrites the other options.
 
 This is the entrypoint for the application that simply builds and runs the Go program.
 
-It spins off a distinct processes per role worker, reputer per topic configered in `config.json`.
+It spins off a distinct processes per role worker, reputer per topic configured in `config.json`.
 
 ## Logging env vars
 
