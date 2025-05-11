@@ -326,19 +326,19 @@ func calculateTimeDistanceInSeconds(distanceUntilNextEpoch int64, blockDurationA
 	return int64(math.Round(correctedTimeDistance)), nil
 }
 
-// Generates a conservative random offset within the submission window
-func generateRandomOffset(submissionWindow int64) int64 {
-	// Ensure the random number generator is seeded
+// Generate jitter between 0 and submissionJitter
+func generateRandomJitter(submissionJitter uint64) int64 {
+	if submissionJitter == 0 {
+		return 0
+	}
 	source := rand.NewSource(uint64(time.Now().UnixNano())) // nolint: gosec
 	rng := rand.New(source)
 
-	// Calculate the center of the window
-	center := submissionWindow / 2
-
-	// Generate a random number between start and window center
-	offset := rng.Int63n(center + 1)
-
-	return offset
+	maxSafeValue := uint64(math.MaxInt64)
+	if submissionJitter > maxSafeValue {
+		submissionJitter = maxSafeValue
+	}
+	return int64(rng.Uint64() % submissionJitter) //nolint:gosec // using a safe max value
 }
 
 // Runs the worker process for a given worker config
@@ -673,9 +673,9 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 			distanceUntilNextEpoch := epochEnd - currentBlockHeight
 			if distanceUntilNextEpoch <= minBlocksToCheck {
 				// Close distance, check more closely until the submission window opens
-				// Introduces a random offset to avoid thundering herd problem
-				offset := generateRandomOffset(params.SubmissionWindowLength)
-				closeBlockDistance := distanceUntilNextEpoch + offset
+				// Introduce a random jitter to avoid thundering herd problem
+				jitter := generateRandomJitter(walletConfig.SubmissionJitter)
+				closeBlockDistance := distanceUntilNextEpoch + jitter
 				waitingTimeInSeconds, err = calculateTimeDistanceInSeconds(
 					closeBlockDistance,
 					walletConfig.BlockDurationEstimated,
@@ -687,7 +687,7 @@ func runActorProcess[T lib.TopicActor](ctx context.Context, suite *UseCaseSuite,
 				}
 				log.Info().
 					Int64("SubmissionWindowLength", params.SubmissionWindowLength).
-					Int64("offset", offset).
+					Int64("jitter", jitter).
 					Int64("currentBlockHeight", currentBlockHeight).
 					Int64("distanceUntilNextEpoch", distanceUntilNextEpoch).
 					Int64("closeBlockDistance", closeBlockDistance).

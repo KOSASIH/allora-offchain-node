@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,67 +122,63 @@ func TestCalculateTimeDistanceInSeconds(t *testing.T) {
 	}
 }
 
-func TestGenerateFairRandomOffset(t *testing.T) {
+func TestGenerateRandomJitter(t *testing.T) {
 	tests := []struct {
-		name                   string
-		workerSubmissionWindow int64
-		expectedMin            int64
-		expectedMax            int64
-		expectedCenter         int64
-		iterations             int
-		allowedDeltaFromCenter float64
+		name             string
+		submissionJitter uint64
+		expectedMin      int64
+		expectedMax      int64
+		iterations       int
 	}{
 		{
-			name:                   "Standard window",
-			workerSubmissionWindow: 100,
-			expectedMin:            0,
-			expectedMax:            50,
-			expectedCenter:         25,
-			iterations:             10000,
-			allowedDeltaFromCenter: 1.0,
+			name:             "Zero jitter",
+			submissionJitter: 0,
+			expectedMin:      0,
+			expectedMax:      0,
+			iterations:       1000,
 		},
 		{
-			name:                   "Large window",
-			workerSubmissionWindow: 1000,
-			expectedMin:            0,
-			expectedMax:            500,
-			expectedCenter:         250,
-			iterations:             10000,
-			allowedDeltaFromCenter: 5.0,
+			name:             "Small jitter",
+			submissionJitter: 10,
+			expectedMin:      0,
+			expectedMax:      9, // Since it's modulo, max will be submissionJitter - 1
+			iterations:       10000,
 		},
 		{
-			name:                   "Small window",
-			workerSubmissionWindow: 20,
-			expectedMin:            0,
-			expectedMax:            10,
-			expectedCenter:         5,
-			iterations:             10000,
-			allowedDeltaFromCenter: 0.5,
+			name:             "Medium jitter",
+			submissionJitter: 100,
+			expectedMin:      0,
+			expectedMax:      99,
+			iterations:       10000,
 		},
 		{
-			name:                   "Odd window size",
-			workerSubmissionWindow: 101,
-			expectedMin:            0,
-			expectedMax:            50,
-			expectedCenter:         25,
-			iterations:             10000,
-			allowedDeltaFromCenter: 1.0,
+			name:             "Large jitter",
+			submissionJitter: 1000,
+			expectedMin:      0,
+			expectedMax:      999,
+			iterations:       10000,
+		},
+		{
+			name:             "Power of two jitter",
+			submissionJitter: 256,
+			expectedMin:      0,
+			expectedMax:      255,
+			iterations:       10000,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			sum := int64(0)
-			for i := 0; i < test.iterations; i++ {
-				result := generateRandomOffset(test.workerSubmissionWindow)
-				assert.GreaterOrEqual(t, result, test.expectedMin, "Result should be greater than or equal to the minimum value")
-				assert.LessOrEqual(t, result, test.expectedMax, "Result should be less than or equal to the maximum value")
-				sum += result
-			}
+			for range make([]struct{}, test.iterations) {
+				result := generateRandomJitter(test.submissionJitter)
+				fmt.Println(result)
 
-			// Check that the average is close to the center (allowing for some randomness)
-			average := float64(sum) / float64(test.iterations)
-			assert.InDelta(t, float64(test.expectedCenter), average, test.allowedDeltaFromCenter, "Average should be close to the center")
+				// Check bounds
+				assert.GreaterOrEqual(t, result, test.expectedMin,
+					"Result should be greater than or equal to the minimum value")
+				assert.LessOrEqual(t, result, test.expectedMax,
+					"Result should be less than or equal to the maximum value")
+			}
 		})
 	}
 }

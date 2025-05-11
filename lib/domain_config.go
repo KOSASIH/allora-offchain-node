@@ -43,6 +43,7 @@ const (
 	DefaultSimulateGasFromStart          bool    = false
 	DefaultGrpcInsecure                  bool    = false
 	DefaultRegistrationWaitingBlocks     int64   = 5
+	DefaultSubmissionJitter              uint64  = 5
 )
 
 // Properties manually provided by the user as part of UserConfig
@@ -76,6 +77,7 @@ type WalletConfig struct {
 	TimeoutRPCSecondsRegistration int64                   // timeout for rpc registration in seconds, including retries
 	TimeoutHTTPConnection         int64                   // timeout for http connection in seconds
 	GrpcInsecure                  bool                    // use insecure grpc connection
+	SubmissionJitter              uint64                  // number of max seconds to add to the submission time, default: 0
 }
 
 // Communication with the chain

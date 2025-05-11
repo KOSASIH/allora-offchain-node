@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* [126](https://github.com/allora-network/allora-offchain-node/pull/126) Remove submission offset, add configurable jitter
+
 ### Fixed
 
 * [124](https://github.com/allora-network/allora-offchain-node/pull/124) Fix early exit from registration

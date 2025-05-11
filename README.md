@@ -203,6 +203,7 @@ This can be configured by the following settings in the config.json:
 
 * `blockDurationEstimated`: Estimated network block time in seconds. Minimum is 1.
 * `windowCorrectionFactor`: Correction factor to fine-tune the submission window length. Higher values optimize the number of calls for window checking. Minimum is 0.5.
+* `submissionJitter`: Maximum number of seconds to randomly add to the submission time to avoid the thundering herd problem and reduce mempool congestion. When set to 0, no jitter is applied. Default is 5 seconds.
 
 ## Configuration examples
 
