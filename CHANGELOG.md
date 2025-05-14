@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* [#129](https://github.com/allora-network/allora-offchain-node/pull/129) Update v0.12.0 chain dependencies
+
 ### Changed
 
 * [126](https://github.com/allora-network/allora-offchain-node/pull/126) Remove submission offset, add configurable jitter
