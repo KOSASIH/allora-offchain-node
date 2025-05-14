@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"sync"
 
 	errorsmod "cosmossdk.io/errors"
 	"github.com/rs/zerolog/log"
+
+	metrics "allora_offchain_node/metrics"
 
 	coretypes "github.com/cometbft/cometbft/rpc/core/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -446,6 +449,11 @@ func RunWithNodeRetry[T any](
 		return zeroValue, errorsmod.Wrapf(err, "error during %s", operationName)
 	}
 
+	wallet, err := connectionManager.GetWallet()
+	if err != nil {
+		return zeroValue, fmt.Errorf("failed to get wallet: %w", err)
+	}
+	metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, "", strconv.Itoa(ErrCodeAllNodesExhausted))
 	return zeroValue, errorsmod.Wrapf(ErrAllNodesExhausted,
 		"tried %d nodes during %s", totalNodes, operationName)
 }

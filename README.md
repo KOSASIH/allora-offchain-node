@@ -64,15 +64,18 @@ Some metrics has been provided for in the node. You can access them with port `:
 - `allora_worker_inference_request_count`: The total number of times worker requests inference from source
 - `allora_worker_forecast_request_count`: The total number of times worker requests forecast from source
 - `allora_reputer_truth_request_count`: The total number of times reputer requests truth from source
-- `allora_worker_data_build_count`: The total number of times worker built data successfully
-- `allora_reputer_data_build_count`: The total number of times reputer built data successfully
 - `allora_worker_chain_submission_count`: The total number of worker commits to the chain
 - `allora_reputer_chain_submission_count`: The total number of reputer commits to the chain
 - `allora_application_finished_count`: The total number of application runs finished
 - `allora_worker_process_finished_count`: The total number of worker processes finished
 - `allora_reputer_process_finished_count`: The total number of reputer processes finished
+- `allora_application_started_count`: The total number of application started
+- `allora_grpc_connection_lost_count`: The total number of times the GRPC connection is lost
+- `allora_grpc_reconnection_count`: The total number of times the GRPC connection is successfully reconnected  
+- `allora_grpc_connection_permanent_failure`: The total number of times the GRPC connection failed permanently
+- `allora_actor_tx_error_count`: The total number of errors by error code per actor - useful to monitor particular errors.
 
-> Please note that we will keep updating the list as more metrics are being added
+> Please note that we will keep updating the list as more metrics are being added. Refer to `metrics/constants.go` for details.
 
 ## Architecture
 

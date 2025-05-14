@@ -42,7 +42,7 @@ const (
 	DefaultGasAdjustment                 float64 = 1.2
 	DefaultSimulateGasFromStart          bool    = false
 	DefaultGrpcInsecure                  bool    = false
-	DefaultRegistrationWaitingBlocks     int64   = 5
+	DefaultRegistrationWaitingBlocks     int64   = 10
 	DefaultSubmissionJitter              uint64  = 5
 )
 

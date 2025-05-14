@@ -2,7 +2,9 @@ package usecase
 
 import (
 	lib "allora_offchain_node/lib"
+	metrics "allora_offchain_node/metrics"
 	"context"
+	"strconv"
 
 	errorsmod "cosmossdk.io/errors"
 	emissionstypes "github.com/allora-network/allora-chain/x/emissions/types"
@@ -68,6 +70,7 @@ func (suite *UseCaseSuite) RegisterWorkerIdempotently(ctx context.Context, confi
 	}
 	if !balance.GTE(moduleParams.Params.RegistrationFee) {
 		log.Error().Str("balance", balance.String()).Msg("Node does not have enough balance to register, skipping.")
+		suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeNotEnoughBalance))
 		return false, lib.ErrNotEnoughBalance
 	}
 
@@ -89,6 +92,7 @@ func (suite *UseCaseSuite) RegisterWorkerIdempotently(ctx context.Context, confi
 			txHash = res.Hash.String()
 		}
 		log.Error().Err(err).Str("txHash", txHash).Msg("Could not register the node with the Allora blockchain")
+		suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeNotRegistered))
 		return false, err
 	}
 
@@ -154,6 +158,7 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 		}
 		if !balance.GTE(moduleParams.Params.RegistrationFee) {
 			log.Error().Msg("Node does not have enough balance to register, skipping.")
+			suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeNotEnoughBalance))
 			return false, lib.ErrNotEnoughBalance
 		}
 
@@ -174,6 +179,7 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 				txHash = res.Hash.String()
 			}
 			log.Error().Err(err).Str("txHash", txHash).Msg("Could not register the node with the Allora blockchain")
+			suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeCannotAddStake))
 			return false, err
 		}
 
@@ -191,6 +197,7 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 		}
 		if !isRegistered {
 			log.Error().Msg("Node not registered after all retries")
+			suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeNotRegistered))
 			return false, lib.ErrNotRegistered
 		}
 	}
@@ -235,6 +242,7 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 			txHash = res.Hash.String()
 		}
 		log.Error().Err(err).Str("txHash", txHash).Msg("Could not stake the node with the Allora blockchain in specified topic")
+		suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeCannotAddStake))
 		return false, err
 	}
 
@@ -252,6 +260,7 @@ func (suite *UseCaseSuite) RegisterAndStakeReputerIdempotently(ctx context.Conte
 	}
 	if stake.LT(minStake) {
 		log.Error().Interface("stake", stake).Interface("minStake", minStake).Msg("Stake below minimum requested stake, skipping.")
+		suite.Metrics.IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(lib.ErrCodeStakeBelowMin))
 		return false, lib.ErrStakeBelowMin
 	}
 

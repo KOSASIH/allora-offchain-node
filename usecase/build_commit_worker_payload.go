@@ -59,7 +59,6 @@ func (suite *UseCaseSuite) BuildCommitWorkerPayload(ctx context.Context, worker 
 	if err != nil {
 		return errorsmod.Wrapf(err, "Error building worker payload, topicId: %d, blockHeight: %d", worker.TopicId, nonce.BlockHeight)
 	}
-	suite.Metrics.IncrementMetricsCounter(metrics.WorkerDataBuildCount, wallet.Address, worker.TopicId)
 
 	workerDataBundle, err := suite.SignWorkerPayload(&workerPayload)
 	if err != nil {

@@ -58,7 +58,6 @@ func (suite *UseCaseSuite) BuildCommitReputerPayload(ctx context.Context, repute
 	if err != nil {
 		return errorsmod.Wrapf(err, "error computing loss bundle, topic: %d, blockHeight: %d", reputer.TopicId, nonce)
 	}
-	suite.Metrics.IncrementMetricsCounter(metrics.ReputerDataBuildCount, wallet.Address, reputer.TopicId)
 
 	signedValueBundle, err := suite.SignReputerValueBundle(&lossBundle)
 	if err != nil {

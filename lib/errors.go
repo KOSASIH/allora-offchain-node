@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	metrics "allora_offchain_node/metrics"
+
 	errorsmod "cosmossdk.io/errors"
 	emissions "github.com/allora-network/allora-chain/x/emissions/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
@@ -19,17 +21,55 @@ import (
 // Error codes for the module
 const ErrorCodespace = "allora-offchain-lib"
 
+// Error codes for the module and also emitted in metrics. Some may only be emitted in metrics.
+const ErrCodeHTTP = 1
+const ErrCodeNotEnoughBalance = 2
+const ErrCodeNotRegistered = 3
+const ErrCodeStakeBelowMin = 4
+const ErrCodeFullMempool = 5
+const ErrCodeReadPanic = 6
+const ErrCodeConnectionRefused = 7
+const ErrCodeAllNodesExhausted = 8
+const ErrCodeTxSimulationError = 9
+const ErrCodeCannotAddStake = 10
+const ErrCodeAccountSequenceMismatch = 11
+const ErrCodeInsufficientFees = 12
+const ErrCodeOutOfGas = 13
+const ErrCodeNoFeeCoins = 14
+const ErrCodeTxTooLarge = 15
+const ErrCodeTxInMempoolCache = 16
+const ErrCodeInvalidChainID = 17
+const ErrCodeTxTimeoutHeight = 18
+const ErrCodeWorkerNonceWindowNotAvailable = 19
+const ErrCodeReputerNonceWindowNotAvailable = 20
+const ErrCodeContextDeadlineExceededTimeout = 21
+const ErrCodeNoInferencesFoundForTopic = 22
+const ErrCodeNotPermittedToSubmitPayload = 23
+const ErrCodeNotPermittedToAddStake = 24
+const ErrCodeReadFlatPanic = 25
+const ErrCodeReadPerBytePanic = 26
+const ErrCodeUnexpectedError = 100
+
 var (
-	ErrHTTP              = errorsmod.Register(ErrorCodespace, 1, "http error")
-	ErrNotEnoughBalance  = errorsmod.Register(ErrorCodespace, 2, "not enough balance")
-	ErrNotRegistered     = errorsmod.Register(ErrorCodespace, 3, "not registered")
-	ErrStakeBelowMin     = errorsmod.Register(ErrorCodespace, 4, "stake below minimum")
-	ErrFullMempool       = errorsmod.Register(ErrorCodespace, 5, "full mempool")
-	ErrReadPanic         = errorsmod.Register(ErrorCodespace, 6, "read panic")
-	ErrConnectionRefused = errorsmod.Register(ErrorCodespace, 7, "connection refused")
-	ErrAllNodesExhausted = errorsmod.Register(ErrorCodespace, 8, "all available nodes have been tried and exhausted")
-	ErrTxSimulationError = errorsmod.Register(ErrorCodespace, 9, "Tx simulation error")
-	ErrUnexpectedError   = errorsmod.Register(ErrorCodespace, 100, "unexpected error")
+	ErrHTTP                           = errorsmod.Register(ErrorCodespace, ErrCodeHTTP, "http error")
+	ErrNotEnoughBalance               = errorsmod.Register(ErrorCodespace, ErrCodeNotEnoughBalance, "not enough balance")
+	ErrNotRegistered                  = errorsmod.Register(ErrorCodespace, ErrCodeNotRegistered, "not registered")
+	ErrStakeBelowMin                  = errorsmod.Register(ErrorCodespace, ErrCodeStakeBelowMin, "stake below minimum")
+	ErrFullMempool                    = errorsmod.Register(ErrorCodespace, ErrCodeFullMempool, "full mempool")
+	ErrReadPanic                      = errorsmod.Register(ErrorCodespace, ErrCodeReadPanic, "read panic")
+	ErrConnectionRefused              = errorsmod.Register(ErrorCodespace, ErrCodeConnectionRefused, "connection refused")
+	ErrAllNodesExhausted              = errorsmod.Register(ErrorCodespace, ErrCodeAllNodesExhausted, "all available nodes have been tried and exhausted")
+	ErrTxSimulationError              = errorsmod.Register(ErrorCodespace, ErrCodeTxSimulationError, "Tx simulation error")
+	ErrCannotAddStake                 = errorsmod.Register(ErrorCodespace, ErrCodeCannotAddStake, "not permitted to add stake")
+	ErrAccountSequenceMismatch        = errorsmod.Register(ErrorCodespace, ErrCodeAccountSequenceMismatch, "account sequence mismatch")
+	ErrInsufficientFees               = errorsmod.Register(ErrorCodespace, ErrCodeInsufficientFees, "insufficient fees")
+	ErrOutOfGas                       = errorsmod.Register(ErrorCodespace, ErrCodeOutOfGas, "out of gas")
+	ErrNoFeeCoins                     = errorsmod.Register(ErrorCodespace, ErrCodeNoFeeCoins, "no fee coins (bad tx)")
+	ErrUnexpectedError                = errorsmod.Register(ErrorCodespace, ErrCodeUnexpectedError, "unexpected error")
+	ErrContextDeadlineExceededTimeout = errorsmod.Register(ErrorCodespace, ErrCodeContextDeadlineExceededTimeout, "context deadline exceeded timeout")
+	ErrReputerNonceWindowNotAvailable = errorsmod.Register(ErrorCodespace, ErrCodeReputerNonceWindowNotAvailable, "reputer nonce window not available")
+	ErrWorkerNonceWindowNotAvailable  = errorsmod.Register(ErrorCodespace, ErrCodeWorkerNonceWindowNotAvailable, "worker nonce window not available")
+	ErrNoInferencesFoundForTopic      = errorsmod.Register(ErrorCodespace, ErrCodeNoInferencesFoundForTopic, "no inferences found for topic")
 )
 
 // Errors substrings that are not ABCI errors and do not have a specific error code
@@ -45,6 +85,8 @@ const ErrorMessageReadPerBytePanic = "{ReadPerByte}: panic"
 const ErrorMessageConnectionRefused = "connection refused"
 const ErrorMessageNoInferencesFoundForTopic = "no inferences found for topic"
 const ErrorContextDeadlineExceeded = "context deadline exceeded"
+const ErrorReputerNonceWindowNotAvailable = "reputer nonce window not available"
+const ErrorWorkerNonceWindowNotAvailable = "worker nonce window not available"
 
 // Error processing types
 // - "continue", nil: tx was not successful, but special error type. Handled, ready for retry
@@ -137,6 +179,7 @@ func triageABCIErrorCode(ctx context.Context, errorCode uint32, err error, infoM
 				Err(err).
 				Str("msg", infoMsg).
 				Msg("Mempool is full, retrying with exponential backoff")
+			metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeFullMempool))
 			return ErrorProcessingContinue, nil
 		}
 	case sdkerrors.ErrWrongSequence.ABCICode(), sdkerrors.ErrInvalidSequence.ABCICode():
@@ -145,34 +188,43 @@ func triageABCIErrorCode(ctx context.Context, errorCode uint32, err error, infoM
 			Str("msg", infoMsg).
 			Int64("delay", walletConfig.AccountSequenceRetryDelay).
 			Msg("Account sequence mismatch detected, re-fetching sequence")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeAccountSequenceMismatch))
 		return parseAndSetNewWalletSequence(ctx, err, node, infoMsg)
 	case sdkerrors.ErrInsufficientFee.ABCICode():
 		log.Info().
 			Err(err).
 			Str("msg", infoMsg).
 			Msg("Insufficient fees")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeInsufficientFees))
 		return ErrorProcessingFees, nil
 	case sdkerrors.ErrOutOfGas.ABCICode():
 		log.Info().
 			Err(err).
 			Str("msg", infoMsg).
 			Msg("Out of gas - increase your base gas")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeOutOfGas))
 		return ErrorProcessingGas, nil
 	case feemarkettypes.ErrNoFeeCoins.ABCICode():
 		log.Info().
 			Err(err).
 			Str("msg", infoMsg).
 			Msg("No fee coins")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeNoFeeCoins))
 		return ErrorProcessingFailure, nil
 	case sdkerrors.ErrTxTooLarge.ABCICode():
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeTxTooLarge))
 		return ErrorProcessingError, errorsmod.Wrapf(err, "tx too large")
 	case sdkerrors.ErrTxInMempoolCache.ABCICode():
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeTxInMempoolCache))
 		return ErrorProcessingError, errorsmod.Wrapf(err, "tx already in mempool cache")
 	case sdkerrors.ErrInvalidChainID.ABCICode():
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeInvalidChainID))
 		return ErrorProcessingError, errorsmod.Wrapf(err, "invalid chain-id")
 	case sdkerrors.ErrTxTimeoutHeight.ABCICode():
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeTxTimeoutHeight))
 		return ErrorProcessingFailure, errorsmod.Wrapf(err, "tx timeout height")
 	case emissions.ErrWorkerNonceWindowNotAvailable.ABCICode():
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeWorkerNonceWindowNotAvailable))
 		log.Warn().
 			Err(err).
 			Str("msg", infoMsg).
@@ -183,6 +235,7 @@ func triageABCIErrorCode(ctx context.Context, errorCode uint32, err error, infoM
 		}
 		return ErrorProcessingContinue, nil
 	case emissions.ErrReputerNonceWindowNotAvailable.ABCICode():
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeReputerNonceWindowNotAvailable))
 		log.Warn().
 			Err(err).
 			Str("msg", infoMsg).
@@ -194,6 +247,7 @@ func triageABCIErrorCode(ctx context.Context, errorCode uint32, err error, infoM
 		return ErrorProcessingContinue, nil
 	default:
 		log.Info().Uint32("errorCode", errorCode).Str("msg", infoMsg).Msg("ABCI error, but not special case - regular retry")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeUnexpectedError))
 		return ErrorProcessingError, err
 	}
 }
@@ -217,6 +271,7 @@ func triageStringMatchingError(ctx context.Context, err error, infoMsg string, n
 
 	} else if strings.Contains(err.Error(), ErrorContextDeadlineExceeded) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Context deadline exceeded, switching to next node")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeContextDeadlineExceededTimeout))
 		return ErrorProcessingSwitchingNode, err
 	} else if strings.Contains(err.Error(), ErrorMessageWaitingForNextBlock) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Tx accepted in mempool, it will be included in the following block(s) - not retrying")
@@ -226,24 +281,37 @@ func triageStringMatchingError(ctx context.Context, err error, infoMsg string, n
 		return ErrorProcessingOk, nil
 	} else if strings.Contains(err.Error(), ErrorMessageTimeoutHeight) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Tx failed because of timeout height")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeTxTimeoutHeight))
 		return ErrorProcessingFailure, err
 	} else if strings.Contains(err.Error(), ErrorMessageNotPermittedToSubmitPayload) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Actor is not permitted to submit payload")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeNotPermittedToSubmitPayload))
 		return ErrorProcessingFailure, err
 	} else if strings.Contains(err.Error(), ErrorMessageNoInferencesFoundForTopic) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("No inferences found for topic")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeNoInferencesFoundForTopic))
 		return ErrorProcessingFailure, err
 	} else if strings.Contains(err.Error(), ErrorMessageNotPermittedToAddStake) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Actor is not permitted to add stake")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeNotPermittedToAddStake))
 		return ErrorProcessingFailure, err
 	} else if strings.Contains(err.Error(), ErrorMessageReadFlatPanic) || strings.Contains(err.Error(), ErrorMessageReadPerBytePanic) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Read panic, switching to next node")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeReadPanic))
 		return ErrorProcessingSwitchingNode, ErrReadPanic
 	} else if strings.Contains(err.Error(), ErrorMessageConnectionRefused) {
 		log.Warn().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Connection refused, switching to next node")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeConnectionRefused))
 		return ErrorProcessingSwitchingNode, ErrConnectionRefused
+	} else if strings.Contains(err.Error(), ErrorReputerNonceWindowNotAvailable) {
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeReputerNonceWindowNotAvailable))
+		return ErrorProcessingContinue, ErrReputerNonceWindowNotAvailable
+	} else if strings.Contains(err.Error(), ErrorWorkerNonceWindowNotAvailable) {
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeWorkerNonceWindowNotAvailable))
+		return ErrorProcessingContinue, ErrWorkerNonceWindowNotAvailable
 	}
 	log.Info().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Unknown error")
+	metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeUnexpectedError))
 	return ErrorProcessingError, errorsmod.Wrap(ErrUnexpectedError, err.Error())
 }
 
@@ -251,11 +319,12 @@ func triageStringMatchingError(ctx context.Context, err error, infoMsg string, n
 func triageHTTPStatusError(err error, node *NodeConfig, infoMsg string) (string, error) {
 	statusCode, statusMessage, parseErr := ParseHTTPStatus(err.Error())
 	if parseErr == nil {
-		log.Warn().
+		log.Info().
 			Int("statusCode", statusCode).
 			Str("statusMessage", statusMessage).
 			Str("msg", infoMsg).
-			Msg("HTTP status code detected")
+			Msg("HTTP status error code detected")
+		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeHTTP))
 
 		// When status code is in the list of codes that trigger node switching, switch to next node without retries
 		if HTTPStatusCodeCodesSwitchingNode[statusCode] {
