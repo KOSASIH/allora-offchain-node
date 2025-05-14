@@ -5,6 +5,7 @@
       "keyringPassphrase": "",
       "addressKeyName": "testkey",
       "addressRestoreMnemonic": "your mnemonic here",
+      "feeGranterAddress": "",
       "alloraHomeDir": "",
       "gasPrices": "auto",
       "gasPriceUpdateInterval": 5,

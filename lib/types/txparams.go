@@ -16,6 +16,7 @@ type TransactionParams struct {
 	PubKey              cryptotypes.PubKey
 	TimeoutHeight       uint64
 	GasEstimationConfig GasEstimationConfig
+	FeeGranterAddress   string
 }
 
 // GasEstimationConfig holds the parameters used for gas estimation.

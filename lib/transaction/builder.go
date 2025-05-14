@@ -4,6 +4,7 @@ import (
 	"allora_offchain_node/lib/rpcclient"
 	types "allora_offchain_node/lib/types"
 	"context"
+	"fmt"
 	gomath "math"
 
 	"cosmossdk.io/math"
@@ -78,6 +79,15 @@ func BuildAndSignTransaction(
 	// Set fees for tx
 	feeCoin := sdktypes.NewCoin(txParams.Denom, fees)
 	txBuilder.SetFeeAmount(sdktypes.NewCoins(feeCoin))
+
+	// Set fee granter (optional)
+	if txParams.FeeGranterAddress != "" {
+		granterAddr, err := sdktypes.AccAddressFromBech32(txParams.FeeGranterAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse fee granter address %v: %w", txParams.FeeGranterAddress, err)
+		}
+		txBuilder.SetFeeGranter(granterAddr)
+	}
 
 	// Set memo and timeout height
 	txBuilder.SetMemo(memo)

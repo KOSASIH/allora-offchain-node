@@ -47,6 +47,7 @@ func (connectionManager *ConnectionManager) SendDataWithRetry(ctx context.Contex
 			OverrideGas:   0,
 			OverrideFees:  0,
 		},
+		FeeGranterAddress: walletConfig.FeeGranterAddress,
 	}
 
 	txNode, err := connectionManager.GetCurrentTxNode()

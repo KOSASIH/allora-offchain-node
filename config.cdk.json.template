@@ -3,6 +3,7 @@
       "addressKeyName": "_ALLORA_WALLET_ADDRESS_KEY_NAME_",
       "addressRestoreMnemonic": "_ALLORA_WALLET_ADDRESS_RESTORE_MNEMONIC_",
       "alloraHomeDir": "_ALLORA_WALLET_HOME_DIR_",
+      "feeGranterAddress": "_ALLORA_FEE_GRANTER_ADDRESS_",
       "gas": "_ALLORA_WALLET_GAS_",
       "gasAdjustment": _ALLORA_WALLET_GAS_ADJUSTMENT_,
       "gasPrices": "_ALLORA_WALLET_GAS_PRICES_",

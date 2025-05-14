@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * [#129](https://github.com/allora-network/allora-offchain-node/pull/129) Update v0.12.0 chain dependencies
 * [#130](https://github.com/allora-network/allora-offchain-node/pull/130) Add error-level metrics, clean existing metrics
+* [#128](https://github.com/allora-network/allora-offchain-node/pull/128) Ability to set FeeGrantAddress when signing transactions
 
 ### Changed
 

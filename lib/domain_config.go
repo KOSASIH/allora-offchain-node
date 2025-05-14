@@ -49,8 +49,9 @@ const (
 // Properties manually provided by the user as part of UserConfig
 type WalletConfig struct {
 	// Provided by the user
-	AddressKeyName                string                  // load a address by key from the keystore
-	AddressRestoreMnemonic        string                  // load a address by mnemonic from the keystore
+	AddressKeyName                string                  // load an address by key from the keystore
+	AddressRestoreMnemonic        string                  // load an address by mnemonic from the keystore
+	FeeGranterAddress             string                  // if set, the address from a fee granter will be used to sign transactions (see x/feegranter)
 	AlloraHomeDir                 string                  // home directory for the allora keystore
 	ChainId                       string                  // chain id
 	KeyringBackend                string                  // keyring backend to use ("test", "os", "file", ...)
