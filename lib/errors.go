@@ -150,7 +150,7 @@ func ProcessErrorTx(ctx context.Context, err error, infoMsg string, retryCount, 
 		return processingType, err
 	}
 
-	return triageStringMatchingError(ctx, err, infoMsg, node)
+	return triageStringMatchingError(ctx, err, infoMsg, node, retryCount)
 }
 
 // triageABCIErrorCode handles specific ABCI error codes and returns appropriate processing instructions
@@ -253,7 +253,7 @@ func triageABCIErrorCode(ctx context.Context, errorCode uint32, err error, infoM
 }
 
 // Triages error by string matching
-func triageStringMatchingError(ctx context.Context, err error, infoMsg string, node *NodeConfig) (string, error) {
+func triageStringMatchingError(ctx context.Context, err error, infoMsg string, node *NodeConfig, retryCount int64) (string, error) {
 	connectionManager := node.ConnectionManager
 	walletConfig, errorWalletConfig := connectionManager.GetWalletConfig()
 	if errorWalletConfig != nil {
@@ -305,10 +305,26 @@ func triageStringMatchingError(ctx context.Context, err error, infoMsg string, n
 		return ErrorProcessingSwitchingNode, ErrConnectionRefused
 	} else if strings.Contains(err.Error(), ErrorReputerNonceWindowNotAvailable) {
 		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeReputerNonceWindowNotAvailable))
-		return ErrorProcessingContinue, ErrReputerNonceWindowNotAvailable
+		log.Warn().
+			Err(err).
+			Str("msg", infoMsg).
+			Msg("Reputer window not available, retrying with exponential backoff")
+		delay := calculateExponentialBackoffDelaySeconds(walletConfig.RetryDelay, retryCount)
+		if DoneOrWait(ctx, delay) {
+			return ErrorProcessingError, ctx.Err()
+		}
+		return ErrorProcessingContinue, nil
 	} else if strings.Contains(err.Error(), ErrorWorkerNonceWindowNotAvailable) {
 		metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeWorkerNonceWindowNotAvailable))
-		return ErrorProcessingContinue, ErrWorkerNonceWindowNotAvailable
+		log.Warn().
+			Err(err).
+			Str("msg", infoMsg).
+			Msg("Worker window not available, retrying with exponential backoff")
+		delay := calculateExponentialBackoffDelaySeconds(walletConfig.RetryDelay, retryCount)
+		if DoneOrWait(ctx, delay) {
+			return ErrorProcessingError, ctx.Err()
+		}
+		return ErrorProcessingContinue, nil
 	}
 	log.Info().Err(err).Str("rpc", node.ServerAddress).Str("msg", infoMsg).Msg("Unknown error")
 	metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, node.ConnectionManager.wallet.Address, strconv.Itoa(ErrCodeUnexpectedError))

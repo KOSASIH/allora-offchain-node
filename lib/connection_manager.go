@@ -453,7 +453,7 @@ func RunWithNodeRetry[T any](
 	if err != nil {
 		return zeroValue, fmt.Errorf("failed to get wallet: %w", err)
 	}
-	metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, "", strconv.Itoa(ErrCodeAllNodesExhausted))
+	metrics.GetMetrics().IncrementMetricsCounterWithLabels(metrics.ActorTxErrorCount, wallet.Address, strconv.Itoa(ErrCodeAllNodesExhausted))
 	return zeroValue, errorsmod.Wrapf(ErrAllNodesExhausted,
 		"tried %d nodes during %s", totalNodes, operationName)
 }
